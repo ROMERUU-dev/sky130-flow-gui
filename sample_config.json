@@ -1,0 +1,16 @@
+{
+  "tools": {
+    "xschem": "/usr/bin/xschem",
+    "ngspice": "/usr/bin/ngspice",
+    "magic": "/usr/bin/magic",
+    "netgen": "/usr/bin/netgen",
+    "klayout": "/usr/bin/klayout"
+  },
+  "pdk": {
+    "pdk_root": "/path/to/pdks",
+    "sky130a": "/path/to/pdks/sky130A",
+    "magic_rc": "/path/to/pdks/sky130A/libs.tech/magic/sky130A.magicrc",
+    "netgen_setup": "/path/to/pdks/sky130A/libs.tech/netgen/sky130A_setup.tcl",
+    "klayout_antenna_deck": "/path/to/antenna/deck_or_script.rb"
+  }
+}
