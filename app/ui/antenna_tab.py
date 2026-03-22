@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
@@ -29,18 +28,16 @@ class AntennaTab(QWidget):
 
     send_status = Signal(str)
 
-    def __init__(self, settings: AppSettings, outputs_getter) -> None:
+    def __init__(self, settings: AppSettings, project_dir_getter) -> None:
         super().__init__()
         self.settings = settings
-        self.outputs_getter = outputs_getter
+        self.project_dir_getter = project_dir_getter
         self.builder = AntennaRunner(settings)
         self.runner = CommandRunner()
 
         self.gds_edit = QLineEdit()
         self.deck_edit = QLineEdit(settings.pdk_paths.klayout_antenna_deck)
         self.top_cell_edit = QLineEdit()
-        self.output_dir = QLineEdit()
-        self.output_dir.setReadOnly(True)
         self.summary = QLineEdit()
         self.summary.setReadOnly(True)
         self.log = QTextEdit()
@@ -55,14 +52,6 @@ class AntennaTab(QWidget):
         form.addRow("GDS File", self._row_file(self.gds_edit, "Select GDS", "GDS (*.gds *.gdsii);;All Files (*)"))
         form.addRow("Antenna Deck", self._row_file(self.deck_edit, "Select antenna deck", "Ruby/Tcl (*.rb *.tcl);;All Files (*)"))
         form.addRow("Top Cell", self.top_cell_edit)
-
-        out_row = QHBoxLayout()
-        out_row.addWidget(self.output_dir)
-        open_btn = QPushButton("Open Output Folder")
-        open_btn.clicked.connect(self.open_output_folder)
-        out_row.addWidget(open_btn)
-        form.addRow("Output Dir", out_row)
-
         layout.addLayout(form)
 
         btns = QHBoxLayout()
@@ -100,14 +89,11 @@ class AntennaTab(QWidget):
             edit.setText(p)
 
     def run(self) -> None:
-        outputs = self.outputs_getter()
-        self.output_dir.setText(str(outputs.antenna))
-
-        cmd, report = self.builder.run_spec(self.gds_edit.text(), self.deck_edit.text(), outputs, self.top_cell_edit.text().strip())
-        append_log(self.log, f"Output folder: {outputs.antenna}\nReport: {report}\n")
-
+        project = Path(self.project_dir_getter() or ".")
+        report = str(project / "results" / "antenna_report.txt")
+        cmd = self.builder.run_spec(self.gds_edit.text(), self.deck_edit.text(), report, self.top_cell_edit.text().strip())
         self.send_status.emit("Antenna check running")
-        self.runner.run(self.builder.build(cmd, cwd=str(outputs.base)))
+        self.runner.run(self.builder.build(cmd, cwd=str(project)))
 
     def _finished(self, code: int, _status: str) -> None:
         text = self.log.toPlainText()
@@ -116,7 +102,3 @@ class AntennaTab(QWidget):
             summary = "Antenna check failed"
         self.summary.setText(summary)
         self.send_status.emit(summary)
-
-    def open_output_folder(self) -> None:
-        if self.output_dir.text().strip():
-            QDesktopServices.openUrl(Path(self.output_dir.text().strip()).as_uri())

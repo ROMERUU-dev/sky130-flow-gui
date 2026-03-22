@@ -17,7 +17,6 @@ It **does not replace** xschem, magic, klayout, ngspice, or netgen; it orchestra
 - Persistent preferences and recent projects (`QSettings`)
 - Environment/path validation with status table
 - Exact command shown in logs for reproducibility
-- Standardized run outputs under project `runs/` directories
 - Stop running jobs
 - Send extracted netlist to simulation tab
 - Technical, dark-mode friendly default Qt styling
@@ -31,7 +30,6 @@ app/
     command_runner.py
     env_validator.py
     log_parser.py
-    output_manager.py
     project_manager.py
     settings_manager.py
   runners/
@@ -112,22 +110,3 @@ python -m app.main
 - Simulation templates
 - Rich report export (PDF/HTML)
 - AppImage/PyInstaller packaging
-
-## Output Location Policy
-
-All generated files are stored either:
-
-- In the active project folder (preferred):
-  - `runs/logs`
-  - `runs/results`
-  - `runs/lvs`
-  - `runs/extraction`
-  - `runs/antenna`
-- Or, if no project is selected, in repository-local fallback workspace:
-  - `workspace/logs`
-  - `workspace/results`
-  - `workspace/lvs`
-  - `workspace/extraction`
-  - `workspace/antenna`
-
-No output is written to Desktop by default.
