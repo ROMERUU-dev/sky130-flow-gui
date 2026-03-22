@@ -5,7 +5,6 @@ from __future__ import annotations
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox, QStatusBar, QTabWidget
 
-from app.core.output_manager import OutputManager
 from app.core.project_manager import ProjectManager
 from app.core.settings_manager import AppSettings, SettingsManager
 from app.ui.antenna_tab import AntennaTab
@@ -26,8 +25,7 @@ class MainWindow(QMainWindow):
 
         self.settings_mgr = SettingsManager()
         self.app_settings: AppSettings = self.settings_mgr.load()
-        self.output_manager = OutputManager()
-        self.project_mgr = ProjectManager(self.output_manager)
+        self.project_mgr = ProjectManager()
         self._current_project = self.app_settings.last_project
 
         self.tabs = QTabWidget()
@@ -45,10 +43,10 @@ class MainWindow(QMainWindow):
         self.project_tab = ProjectTab(self.project_mgr, self.app_settings.recent_projects)
         self.project_tab.project_changed.connect(self._on_project_changed)
 
-        self.sim_tab = SimulationTab(self.app_settings, self.project_mgr.outputs)
-        self.lvs_tab = LvsTab(self.app_settings, self.project_mgr.outputs)
-        self.ext_tab = ExtractionTab(self.app_settings, self.project_mgr.outputs)
-        self.ant_tab = AntennaTab(self.app_settings, self.project_mgr.outputs)
+        self.sim_tab = SimulationTab(self.app_settings, self.current_project)
+        self.lvs_tab = LvsTab(self.app_settings, self.current_project)
+        self.ext_tab = ExtractionTab(self.app_settings, self.current_project)
+        self.ant_tab = AntennaTab(self.app_settings, self.current_project)
         self.pref_tab = PreferencesTab(self.app_settings)
 
         self.ext_tab.netlist_ready.connect(self._receive_extracted_netlist)
@@ -66,8 +64,6 @@ class MainWindow(QMainWindow):
 
         if self._current_project:
             self.project_tab.set_project(self._current_project)
-        else:
-            self.project_mgr.ensure_structure()
 
     def _build_menu(self) -> None:
         menu = self.menuBar().addMenu("Tools")

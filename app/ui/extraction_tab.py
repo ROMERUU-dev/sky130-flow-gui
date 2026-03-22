@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
@@ -29,17 +28,16 @@ class ExtractionTab(QWidget):
     send_status = Signal(str)
     netlist_ready = Signal(str)
 
-    def __init__(self, settings: AppSettings, outputs_getter) -> None:
+    def __init__(self, settings: AppSettings, project_dir_getter) -> None:
         super().__init__()
         self.settings = settings
-        self.outputs_getter = outputs_getter
+        self.project_dir_getter = project_dir_getter
         self.builder = MagicRunner(settings)
         self.runner = CommandRunner()
 
         self.top_cell = QLineEdit()
         self.script_path = QLineEdit()
-        self.output_dir = QLineEdit()
-        self.output_dir.setReadOnly(True)
+        self.layout_dir = QLineEdit()
         self.log = QTextEdit()
         self.log.setReadOnly(True)
 
@@ -51,6 +49,13 @@ class ExtractionTab(QWidget):
         layout = QVBoxLayout(self)
         form = QFormLayout()
 
+        row_dir = QHBoxLayout()
+        row_dir.addWidget(self.layout_dir)
+        bdir = QPushButton("Browse")
+        bdir.clicked.connect(self._pick_dir)
+        row_dir.addWidget(bdir)
+        form.addRow("Project/Layout Dir", row_dir)
+
         form.addRow("Top Cell", self.top_cell)
 
         row_script = QHBoxLayout()
@@ -59,13 +64,6 @@ class ExtractionTab(QWidget):
         bs.clicked.connect(self._pick_script)
         row_script.addWidget(bs)
         form.addRow("Magic Script (optional)", row_script)
-
-        row_out = QHBoxLayout()
-        row_out.addWidget(self.output_dir)
-        bout = QPushButton("Open Output Folder")
-        bout.clicked.connect(self.open_output_folder)
-        row_out.addWidget(bout)
-        form.addRow("Output Dir", row_out)
 
         layout.addLayout(form)
 
@@ -89,26 +87,34 @@ class ExtractionTab(QWidget):
         self.runner.line_output.connect(lambda txt: append_log(self.log, txt))
         self.runner.finished.connect(self._finished)
 
+    def _pick_dir(self) -> None:
+        p = QFileDialog.getExistingDirectory(self, "Select layout directory")
+        if p:
+            self.layout_dir.setText(p)
+
     def _pick_script(self) -> None:
         p, _ = QFileDialog.getOpenFileName(self, "Select magic script", "", "Tcl (*.tcl)")
         if p:
             self.script_path.setText(p)
 
     def run(self) -> None:
-        outputs = self.outputs_getter()
-        self.output_dir.setText(str(outputs.extraction))
+        project = Path(self.project_dir_getter() or self.layout_dir.text() or ".")
+        project.mkdir(parents=True, exist_ok=True)
+        results = project / "results"
+        scripts = project / "scripts"
+        results.mkdir(parents=True, exist_ok=True)
+        scripts.mkdir(parents=True, exist_ok=True)
 
         top = self.top_cell.text().strip() or "top"
-        cmd, script, self._out_netlist = self.builder.run_spec(
-            outputs=outputs,
-            top_cell=top,
-            script_path=self.script_path.text().strip() or None,
-            rcfile=self.settings.pdk_paths.magic_rc or None,
-        )
-        append_log(self.log, f"Output folder: {outputs.extraction}\nScript: {script}\nNetlist: {self._out_netlist}\n")
+        self._out_netlist = str(results / f"{top}_extracted.spice")
+        script = self.script_path.text().strip() or str(scripts / "extract_magic.tcl")
 
+        if not self.script_path.text().strip():
+            self.builder.create_extraction_script(script, top, self._out_netlist)
+
+        cmd = self.builder.run_spec(script, rcfile=self.settings.pdk_paths.magic_rc or None, cwd=str(project))
         self.send_status.emit("Extraction running")
-        self.runner.run(self.builder.build(cmd, cwd=str(outputs.base)))
+        self.runner.run(self.builder.build(cmd, cwd=str(project)))
 
     def _finished(self, code: int, _status: str) -> None:
         if code == 0:
@@ -120,7 +126,3 @@ class ExtractionTab(QWidget):
     def _send_result(self) -> None:
         if self._out_netlist:
             self.netlist_ready.emit(self._out_netlist)
-
-    def open_output_folder(self) -> None:
-        if self.output_dir.text().strip():
-            QDesktopServices.openUrl(Path(self.output_dir.text().strip()).as_uri())

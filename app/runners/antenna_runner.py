@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from app.core.output_manager import OutputPaths
 from app.runners.base_runner import BaseRunner
 
 
@@ -15,12 +12,9 @@ class AntennaRunner(BaseRunner):
         self,
         gds_file: str,
         deck_path: str,
-        outputs: OutputPaths,
+        report_path: str,
         top_cell: str = "",
-    ) -> tuple[list[str], str]:
-        gds_stem = Path(gds_file).stem or "layout"
-        report_path = str(outputs.antenna / f"antenna_{gds_stem}.txt")
-
+    ) -> list[str]:
         self.ensure_parent(report_path)
         cmd = [
             self.settings.tool_paths.klayout,
@@ -34,4 +28,4 @@ class AntennaRunner(BaseRunner):
         ]
         if top_cell:
             cmd += ["-rd", f"topcell={top_cell}"]
-        return cmd, report_path
+        return cmd
