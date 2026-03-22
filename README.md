@@ -34,12 +34,16 @@ app/
     output_manager.py
     project_manager.py
     settings_manager.py
+    update_manager.py
+    integration_manager.py
   runners/
     base_runner.py
     ngspice_runner.py
     lvs_runner.py
     magic_runner.py
     antenna_runner.py
+  resources/
+    sky130-flow-gui.svg
   ui/
     main_window.py
     simulation_tab.py
@@ -129,3 +133,29 @@ All generated files are stored either:
   - `workspace/antenna`
 
 No output is written to Desktop by default.
+
+## Actualizar una instalación existente
+
+Si ya lo tenías instalado desde este repo, tienes dos opciones:
+
+1. Desde la GUI (Preferences):
+   - `Buscar actualizaciones`
+   - `Actualizar ahora`
+2. Desde terminal:
+
+```bash
+git pull --ff-only
+```
+
+Después de actualizar, reinicia la aplicación.
+
+## Instalar como icono de aplicación (Linux)
+
+En la pestaña Preferences usa **Instalar icono de aplicación**.
+Esto crea:
+
+- `~/.local/bin/sky130-flow-gui` (launcher)
+- `~/.local/share/applications/sky130-flow-gui.desktop`
+- `~/.local/share/icons/hicolor/scalable/apps/sky130-flow-gui.svg`
+
+Luego podrás abrirla desde el menú de aplicaciones del escritorio.
