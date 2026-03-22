@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from app.core.command_runner import CommandRunner
 from app.core.log_parser import LogParser
+from app.core.output_manager import OutputPaths
 from app.core.settings_manager import AppSettings
 from app.runners.ngspice_runner import NgspiceRunner
 from app.ui.waveform_viewer import WaveformViewer
@@ -29,14 +31,16 @@ class SimulationTab(QWidget):
 
     send_status = Signal(str)
 
-    def __init__(self, settings: AppSettings, project_dir_getter) -> None:
+    def __init__(self, settings: AppSettings, outputs_getter) -> None:
         super().__init__()
         self.settings = settings
-        self.project_dir_getter = project_dir_getter
+        self.outputs_getter = outputs_getter
         self.runner = CommandRunner()
         self.builder = NgspiceRunner(settings)
 
         self.netlist_edit = QLineEdit()
+        self.output_dir = QLineEdit()
+        self.output_dir.setReadOnly(True)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.file_view = QTextEdit()
@@ -46,8 +50,10 @@ class SimulationTab(QWidget):
         self.stop_btn = QPushButton("Stop")
         self.rerun_btn = QPushButton("Re-run")
         self.clear_btn = QPushButton("Clear log")
+        self.open_out_btn = QPushButton("Open Output Folder")
 
         self._last_command: list[str] = []
+        self._last_outputs: OutputPaths | None = None
 
         self._build_ui()
         self._wire()
@@ -62,6 +68,12 @@ class SimulationTab(QWidget):
         pick.clicked.connect(self._pick_file)
         row.addWidget(pick)
         layout.addLayout(row)
+
+        out_row = QHBoxLayout()
+        out_row.addWidget(QLabel("Output Dir:"))
+        out_row.addWidget(self.output_dir)
+        out_row.addWidget(self.open_out_btn)
+        layout.addLayout(out_row)
 
         btns = QHBoxLayout()
         btns.addWidget(self.run_btn)
@@ -83,6 +95,7 @@ class SimulationTab(QWidget):
         self.stop_btn.clicked.connect(self.runner.stop)
         self.rerun_btn.clicked.connect(self.rerun)
         self.clear_btn.clicked.connect(self.log.clear)
+        self.open_out_btn.clicked.connect(self.open_output_folder)
 
         self.runner.started.connect(lambda cmd: append_log(self.log, f"\n$ {cmd}\n"))
         self.runner.line_output.connect(lambda txt: append_log(self.log, txt))
@@ -104,25 +117,22 @@ class SimulationTab(QWidget):
             append_log(self.log, "Select a netlist first.\n")
             return
 
-        project = Path(self.project_dir_getter() or Path(netlist).parent)
-        logs = project / "logs"
-        results = project / "results"
-        logs.mkdir(parents=True, exist_ok=True)
-        results.mkdir(parents=True, exist_ok=True)
+        outputs = self.outputs_getter()
+        self._last_outputs = outputs
+        self.output_dir.setText(str(outputs.results))
 
-        log_path = str(logs / "ngspice.log")
-        raw_path = str(results / "sim.raw")
-        cmd = self.builder.run_spec(netlist, log_path, raw_path)
+        cmd, log_path, _raw_path = self.builder.run_spec(netlist, outputs)
+        append_log(self.log, f"Output folder: {outputs.results}\nLog file: {log_path}\n")
         self._last_command = cmd
         self.send_status.emit("Simulation running")
-        self.runner.run(self.builder.build(cmd, cwd=str(project)))
+        self.runner.run(self.builder.build(cmd, cwd=str(outputs.base)))
 
     def rerun(self) -> None:
         if not self._last_command:
             self.run()
             return
         self.send_status.emit("Simulation running")
-        self.runner.run(self.builder.build(self._last_command))
+        self.runner.run(self.builder.build(self._last_command, cwd=str(self._last_outputs.base) if self._last_outputs else None))
 
     def _finished(self, code: int, status: str) -> None:
         summary = f"\nSimulation finished: exit={code} status={status}\n"
@@ -132,3 +142,7 @@ class SimulationTab(QWidget):
             self.send_status.emit("Simulation failed")
         else:
             self.send_status.emit("Simulation completed")
+
+    def open_output_folder(self) -> None:
+        if self.output_dir.text().strip():
+            QDesktopServices.openUrl(Path(self.output_dir.text().strip()).as_uri())

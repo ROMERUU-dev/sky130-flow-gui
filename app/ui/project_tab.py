@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -37,6 +38,7 @@ class ProjectTab(QWidget):
 
         self._build_ui()
         self._load_recent()
+        self._refresh_context_label()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -46,13 +48,17 @@ class ProjectTab(QWidget):
         pick.clicked.connect(self.pick_project)
         row.addWidget(pick)
 
-        open_results = QPushButton("Open Results Folder")
-        open_results.clicked.connect(lambda: self._open_subfolder("results"))
+        open_results = QPushButton("Open Runs/Results")
+        open_results.clicked.connect(lambda: self._open_output_subfolder("results"))
         row.addWidget(open_results)
 
-        open_logs = QPushButton("Open Logs Folder")
-        open_logs.clicked.connect(lambda: self._open_subfolder("logs"))
+        open_logs = QPushButton("Open Runs/Logs")
+        open_logs.clicked.connect(lambda: self._open_output_subfolder("logs"))
         row.addWidget(open_logs)
+
+        open_workspace = QPushButton("Open Active Output Root")
+        open_workspace.clicked.connect(self._open_output_root)
+        row.addWidget(open_workspace)
 
         layout.addLayout(row)
         layout.addWidget(self.current_label)
@@ -77,13 +83,17 @@ class ProjectTab(QWidget):
     def set_project(self, path: str) -> None:
         self.manager.set_project(path)
         self.manager.ensure_structure()
-        self.current_label.setText(f"Project: {path}")
+        self._refresh_context_label()
         self._index_files()
         if path not in self.recent_projects:
             self.recent_projects.insert(0, path)
             self.recent_projects[:] = self.recent_projects[:15]
             self._load_recent()
         self.project_changed.emit(path)
+
+    def _refresh_context_label(self) -> None:
+        outputs = self.manager.outputs()
+        self.current_label.setText(f"Active output root: {outputs.runs}")
 
     def _index_files(self) -> None:
         found = self.manager.find_common_files()
@@ -93,6 +103,8 @@ class ProjectTab(QWidget):
             summary.append(f"{category}: {len(files)}")
             for file in files[:25]:
                 self.files.addItem(f"[{category}] {file}")
+        if not summary:
+            summary.append("No project selected; using fallback workspace outputs.")
         self.info.setPlainText("\n".join(summary))
 
     def _open_recent(self) -> None:
@@ -100,9 +112,9 @@ class ProjectTab(QWidget):
         if item:
             self.set_project(item.text())
 
-    def _open_subfolder(self, name: str) -> None:
-        if not self.manager.current_project:
-            return
-        sub = self.manager.current_project / name
-        sub.mkdir(exist_ok=True)
-        QFileDialog.getOpenFileName(self, f"{name} folder", str(sub))
+    def _open_output_subfolder(self, name: str) -> None:
+        folder = getattr(self.manager.outputs(), name)
+        QDesktopServices.openUrl(folder.as_uri())
+
+    def _open_output_root(self) -> None:
+        QDesktopServices.openUrl(self.manager.outputs().runs.as_uri())

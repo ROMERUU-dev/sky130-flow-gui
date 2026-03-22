@@ -98,10 +98,10 @@ class SettingsManager:
 
     @staticmethod
     def default_results_dir(project_dir: str) -> Path:
-        """Return default results path inside a project."""
-        return Path(project_dir).joinpath("results")
+        """Return default results path inside project runs."""
+        return Path(project_dir).joinpath("runs", "results")
 
     @staticmethod
     def default_logs_dir(project_dir: str) -> Path:
-        """Return default logs path inside a project."""
-        return Path(project_dir).joinpath("logs")
+        """Return default logs path inside project runs."""
+        return Path(project_dir).joinpath("runs", "logs")

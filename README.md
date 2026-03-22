@@ -17,6 +17,7 @@ It **does not replace** xschem, magic, klayout, ngspice, or netgen; it orchestra
 - Persistent preferences and recent projects (`QSettings`)
 - Environment/path validation with status table
 - Exact command shown in logs for reproducibility
+- Standardized run outputs under project `runs/` directories
 - Stop running jobs
 - Send extracted netlist to simulation tab
 - Technical, dark-mode friendly default Qt styling
@@ -30,14 +31,19 @@ app/
     command_runner.py
     env_validator.py
     log_parser.py
+    output_manager.py
     project_manager.py
     settings_manager.py
+    update_manager.py
+    integration_manager.py
   runners/
     base_runner.py
     ngspice_runner.py
     lvs_runner.py
     magic_runner.py
     antenna_runner.py
+  resources/
+    sky130-flow-gui.svg
   ui/
     main_window.py
     simulation_tab.py
@@ -47,11 +53,9 @@ app/
     project_tab.py
     preferences_tab.py
     waveform_viewer.py
+    splash.py
     widgets.py
-examples/
-  sky130_project/
 requirements.txt
-sample_config.json
 README.md
 ```
 
@@ -98,7 +102,7 @@ python -m app.main
 
 ## MVP Limitations
 
-- Waveform plotting currently provides a simple viewer scaffold with dummy traces until a robust `.raw` parser is added.
+- Waveform plotting is ready to receive real parsed simulation traces (no dummy/example traces are shown by default).
 - Log parsing is heuristic/simple and intended as a starting point.
 
 ## Phase 2 Suggestions
@@ -110,3 +114,92 @@ python -m app.main
 - Simulation templates
 - Rich report export (PDF/HTML)
 - AppImage/PyInstaller packaging
+
+## Output Location Policy
+
+All generated files are stored either:
+
+- In the active project folder (preferred):
+  - `runs/logs`
+  - `runs/results`
+  - `runs/lvs`
+  - `runs/extraction`
+  - `runs/antenna`
+- Or, if no project is selected, in repository-local fallback workspace:
+  - `workspace/logs`
+  - `workspace/results`
+  - `workspace/lvs`
+  - `workspace/extraction`
+  - `workspace/antenna`
+
+No output is written to Desktop by default.
+
+## Actualizar una instalación existente
+
+Si ya lo tenías instalado desde este repo, tienes dos opciones:
+
+1. Desde la GUI (Preferences):
+   - `Buscar actualizaciones`
+   - `Actualizar ahora`
+2. Desde terminal:
+
+```bash
+git pull --ff-only
+```
+
+Después de actualizar, reinicia la aplicación.
+
+## Instalar como icono de aplicación (Linux)
+
+En la pestaña Preferences usa **Instalar icono de aplicación**.
+Esto crea:
+
+- `~/.local/bin/sky130-flow-gui` (launcher)
+- `~/.local/share/applications/sky130-flow-gui.desktop`
+- `~/.local/share/icons/hicolor/scalable/apps/sky130-flow-gui.svg`
+
+Luego podrás abrirla desde el menú de aplicaciones del escritorio.
+
+## Cómo abrir la aplicación
+
+Puedes abrirla de 3 formas:
+
+1. Desde terminal en el repo:
+
+```bash
+python -m app.main
+```
+
+2. Desde el launcher (si instalaste icono):
+
+```bash
+~/.local/bin/sky130-flow-gui
+```
+
+3. Desde el menú de aplicaciones de tu escritorio (entrada: **SKY130 Flow GUI**).
+
+## Desinstalar
+
+Si instalaste icono/launcher, elimina estos archivos:
+
+```bash
+rm -f ~/.local/bin/sky130-flow-gui
+rm -f ~/.local/share/applications/sky130-flow-gui.desktop
+rm -f ~/.local/share/icons/hicolor/scalable/apps/sky130-flow-gui.svg
+update-desktop-database ~/.local/share/applications
+```
+
+Y para quitar el código de la app, elimina el directorio del repositorio donde la clonaste.
+
+## Subir cambios bien desde Codex Web (rápido)
+
+1. Verifica que estás en tu rama de trabajo (por ejemplo `work`) y que los cambios estén confirmados (commit).
+2. Publica la rama al remoto (`origin`): `git push -u origin work`.
+3. En GitHub, crea el Pull Request: `work` -> `main`.
+4. Si hay conflictos en GitHub:
+   - **Accept incoming**: te quedas con lo que viene de la rama del PR.
+   - **Accept current**: te quedas con lo que ya tenía la rama base.
+   - Recomendado: revisar el diff final antes de confirmar el merge.
+5. Haz **Merge pull request** en GitHub y luego en tu máquina local:
+   - `git checkout main`
+   - `git pull --ff-only origin main`

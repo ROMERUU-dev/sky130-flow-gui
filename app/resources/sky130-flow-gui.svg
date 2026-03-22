@@ -4,16 +4,15 @@
       <stop offset="0%" stop-color="#0b1220"/>
       <stop offset="100%" stop-color="#1d2f4f"/>
     </linearGradient>
-    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#24d6ff"/>
-      <stop offset="100%" stop-color="#19f0b1"/>
-    </linearGradient>
   </defs>
   <rect x="24" y="24" width="464" height="464" rx="56" fill="url(#bg)" stroke="#2edcff" stroke-width="8"/>
-  <text x="60" y="120" fill="#9de6ff" font-family="DejaVu Sans, Arial" font-size="42" font-weight="700">SKY130</text>
-  <text x="60" y="170" fill="#d9e9ff" font-family="DejaVu Sans, Arial" font-size="34" font-weight="700">Flow GUI</text>
-  <line x1="60" y1="250" x2="452" y2="250" stroke="url(#acc)" stroke-width="10"/>
-  <line x1="60" y1="300" x2="452" y2="300" stroke="url(#acc)" stroke-width="10"/>
-  <line x1="60" y1="350" x2="452" y2="350" stroke="url(#acc)" stroke-width="10"/>
-  <text x="60" y="430" fill="#9cb8d4" font-family="DejaVu Sans, Arial" font-size="24">xschem · ngspice · magic</text>
+
+  <g fill="#ffffff" transform="translate(120,145) scale(0.72)">
+    <path d="M53 162C24 96 57 32 132 26C174 0 236 2 264 40C292 77 289 118 268 149C306 149 336 173 347 205C367 255 346 316 287 340C252 355 199 355 163 340C109 318 87 282 86 230C79 222 72 203 53 162Z"/>
+    <path d="M312 87C350 5 459 -7 530 62C582 112 594 180 577 241C556 226 530 218 499 218C466 218 437 229 415 252C421 192 391 132 312 87Z"/>
+    <path d="M150 343C140 377 135 412 141 439H192C200 410 197 376 184 343Z"/>
+  </g>
+
+  <text x="54" y="98" fill="#9de6ff" font-family="DejaVu Sans, Arial" font-size="28" font-weight="700">SKY130 Flow GUI</text>
+  <text x="54" y="460" fill="#a7bddb" font-family="DejaVu Sans, Arial" font-size="20">xschem · ngspice · magic · netgen · klayout</text>
 </svg>
