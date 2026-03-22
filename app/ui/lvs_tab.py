@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
@@ -29,18 +28,16 @@ class LvsTab(QWidget):
 
     send_status = Signal(str)
 
-    def __init__(self, settings: AppSettings, outputs_getter) -> None:
+    def __init__(self, settings: AppSettings, project_dir_getter) -> None:
         super().__init__()
         self.settings = settings
-        self.outputs_getter = outputs_getter
+        self.project_dir_getter = project_dir_getter
         self.builder = LvsRunner(settings)
         self.runner = CommandRunner()
 
         self.layout_edit = QLineEdit()
         self.schematic_edit = QLineEdit()
         self.setup_edit = QLineEdit(settings.pdk_paths.netgen_setup)
-        self.output_dir = QLineEdit()
-        self.output_dir.setReadOnly(True)
         self.summary = QLineEdit()
         self.summary.setReadOnly(True)
         self.log = QTextEdit()
@@ -63,14 +60,6 @@ class LvsTab(QWidget):
         form.addRow("Layout/Extracted Netlist", self._file_row(self.layout_edit, "Select layout netlist", "Netlist (*.spice *.sp *.cir)"))
         form.addRow("Schematic Netlist", self._file_row(self.schematic_edit, "Select schematic netlist", "Netlist (*.spice *.sp *.cir)"))
         form.addRow("Netgen Setup Tcl", self._file_row(self.setup_edit, "Select netgen setup", "Tcl (*.tcl);;All Files (*)"))
-
-        out_row = QHBoxLayout()
-        out_row.addWidget(self.output_dir)
-        open_btn = QPushButton("Open Output Folder")
-        open_btn.clicked.connect(self.open_output_folder)
-        out_row.addWidget(open_btn)
-        form.addRow("Output Dir", out_row)
-
         layout.addLayout(form)
 
         btns = QHBoxLayout()
@@ -103,12 +92,11 @@ class LvsTab(QWidget):
             edit.setText(p)
 
     def run(self) -> None:
-        outputs = self.outputs_getter()
-        self.output_dir.setText(str(outputs.lvs))
-        cmd, report = self.builder.run_spec(self.layout_edit.text(), self.schematic_edit.text(), self.setup_edit.text(), outputs)
-        append_log(self.log, f"Output folder: {outputs.lvs}\nReport: {report}\n")
+        project = Path(self.project_dir_getter() or ".")
+        report = str(project / "results" / "lvs_report.log")
+        cmd = self.builder.run_spec(self.layout_edit.text(), self.schematic_edit.text(), self.setup_edit.text(), report)
         self.send_status.emit("LVS running")
-        self.runner.run(self.builder.build(cmd, cwd=str(outputs.base)))
+        self.runner.run(self.builder.build(cmd, cwd=str(project)))
 
     def _finished(self, code: int, _status: str) -> None:
         text = self.log.toPlainText()
@@ -122,7 +110,3 @@ class LvsTab(QWidget):
         out, _ = QFileDialog.getSaveFileName(self, "Save LVS report", "lvs_report.txt", "Text (*.txt)")
         if out:
             Path(out).write_text(self.log.toPlainText())
-
-    def open_output_folder(self) -> None:
-        if self.output_dir.text().strip():
-            QDesktopServices.openUrl(Path(self.output_dir.text().strip()).as_uri())
