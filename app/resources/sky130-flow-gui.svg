@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1220"/>
+      <stop offset="100%" stop-color="#1d2f4f"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="56" fill="url(#bg)" stroke="#2edcff" stroke-width="8"/>
+
+  <g fill="#ffffff" transform="translate(120,145) scale(0.72)">
+    <path d="M53 162C24 96 57 32 132 26C174 0 236 2 264 40C292 77 289 118 268 149C306 149 336 173 347 205C367 255 346 316 287 340C252 355 199 355 163 340C109 318 87 282 86 230C79 222 72 203 53 162Z"/>
+    <path d="M312 87C350 5 459 -7 530 62C582 112 594 180 577 241C556 226 530 218 499 218C466 218 437 229 415 252C421 192 391 132 312 87Z"/>
+    <path d="M150 343C140 377 135 412 141 439H192C200 410 197 376 184 343Z"/>
+  </g>
+
+  <text x="54" y="98" fill="#9de6ff" font-family="DejaVu Sans, Arial" font-size="28" font-weight="700">SKY130 Flow GUI</text>
+  <text x="54" y="460" fill="#a7bddb" font-family="DejaVu Sans, Arial" font-size="20">xschem · ngspice · magic · netgen · klayout</text>
+</svg>
