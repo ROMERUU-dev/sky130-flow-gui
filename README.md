@@ -134,53 +134,53 @@ All generated files are stored either:
 
 No output is written to Desktop by default.
 
-## Actualizar una instalación existente
+## Update an Existing Installation
 
-Si ya lo tenías instalado desde este repo, tienes dos opciones:
+If you already installed it from this repo, you have two options:
 
-1. Desde la GUI (Preferences):
-   - `Buscar actualizaciones`
-   - `Actualizar ahora`
-2. Desde terminal:
+1. From the GUI (`Preferences`):
+   - `Check for updates`
+   - `Update now`
+2. From the terminal:
 
 ```bash
 git pull --ff-only
 ```
 
-Después de actualizar, reinicia la aplicación.
+After updating, restart the application.
 
-## Instalar como icono de aplicación (Linux)
+## Install as an Application Icon (Linux)
 
-En la pestaña Preferences usa **Instalar icono de aplicación**.
-Esto crea:
+In the `Preferences` tab, use **Install application icon**.
+This creates:
 
 - `~/.local/bin/sky130-flow-gui` (launcher)
 - `~/.local/share/applications/sky130-flow-gui.desktop`
 - `~/.local/share/icons/hicolor/scalable/apps/sky130-flow-gui.svg`
 
-Luego podrás abrirla desde el menú de aplicaciones del escritorio.
+You will then be able to open it from your desktop applications menu.
 
-## Cómo abrir la aplicación
+## How to Open the Application
 
-Puedes abrirla de 3 formas:
+You can open it in 3 ways:
 
-1. Desde terminal en el repo:
+1. From a terminal in the repo:
 
 ```bash
 python -m app.main
 ```
 
-2. Desde el launcher (si instalaste icono):
+2. From the launcher (if you installed the icon):
 
 ```bash
 ~/.local/bin/sky130-flow-gui
 ```
 
-3. Desde el menú de aplicaciones de tu escritorio (entrada: **SKY130 Flow GUI**).
+3. From your desktop applications menu (entry: **SKY130 Flow GUI**).
 
-## Desinstalar
+## Uninstall
 
-Si instalaste icono/launcher, elimina estos archivos:
+If you installed the icon/launcher, remove these files:
 
 ```bash
 rm -f ~/.local/bin/sky130-flow-gui
@@ -189,17 +189,17 @@ rm -f ~/.local/share/icons/hicolor/scalable/apps/sky130-flow-gui.svg
 update-desktop-database ~/.local/share/applications
 ```
 
-Y para quitar el código de la app, elimina el directorio del repositorio donde la clonaste.
+To remove the app source code as well, delete the repository directory where you cloned it.
 
-## Subir cambios bien desde Codex Web (rápido)
+## Push Changes Properly from Codex Web (Quick)
 
-1. Verifica que estás en tu rama de trabajo (por ejemplo `work`) y que los cambios estén confirmados (commit).
-2. Publica la rama al remoto (`origin`): `git push -u origin work`.
-3. En GitHub, crea el Pull Request: `work` -> `main`.
-4. Si hay conflictos en GitHub:
-   - **Accept incoming**: te quedas con lo que viene de la rama del PR.
-   - **Accept current**: te quedas con lo que ya tenía la rama base.
-   - Recomendado: revisar el diff final antes de confirmar el merge.
-5. Haz **Merge pull request** en GitHub y luego en tu máquina local:
+1. Verify that you are on your working branch (for example `work`) and that your changes are committed.
+2. Publish the branch to the remote (`origin`): `git push -u origin work`.
+3. On GitHub, create the Pull Request: `work` -> `main`.
+4. If there are conflicts on GitHub:
+   - **Accept incoming**: keep what comes from the PR branch.
+   - **Accept current**: keep what the base branch already had.
+   - Recommended: review the final diff before confirming the merge.
+5. Click **Merge pull request** on GitHub and then on your local machine:
    - `git checkout main`
    - `git pull --ff-only origin main`

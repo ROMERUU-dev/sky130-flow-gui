@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from app.core.command_runner import CommandRunner
 from app.core.log_parser import LogParser
+from app.core.ngspice_raw_parser import NgspiceRawParser
 from app.core.output_manager import OutputPaths
 from app.core.settings_manager import AppSettings
 from app.runners.ngspice_runner import NgspiceRunner
@@ -54,6 +55,7 @@ class SimulationTab(QWidget):
 
         self._last_command: list[str] = []
         self._last_outputs: OutputPaths | None = None
+        self._last_raw_path: Path | None = None
 
         self._build_ui()
         self._wire()
@@ -121,9 +123,11 @@ class SimulationTab(QWidget):
         self._last_outputs = outputs
         self.output_dir.setText(str(outputs.results))
 
-        cmd, log_path, _raw_path = self.builder.run_spec(netlist, outputs)
+        cmd, log_path, raw_path = self.builder.run_spec(netlist, outputs)
         append_log(self.log, f"Output folder: {outputs.results}\nLog file: {log_path}\n")
         self._last_command = cmd
+        self._last_raw_path = Path(raw_path)
+        self.wave.set_signals({})
         self.send_status.emit("Simulation running")
         self.runner.run(self.builder.build(cmd, cwd=str(outputs.base)))
 
@@ -141,8 +145,44 @@ class SimulationTab(QWidget):
         if LogParser.has_errors(full_text) or code != 0:
             self.send_status.emit("Simulation failed")
         else:
+            self._load_waveforms()
             self.send_status.emit("Simulation completed")
 
     def open_output_folder(self) -> None:
         if self.output_dir.text().strip():
             QDesktopServices.openUrl(Path(self.output_dir.text().strip()).as_uri())
+
+    def _load_waveforms(self) -> None:
+        raw_path = self._resolve_raw_path()
+        if not raw_path:
+            append_log(self.log, "No waveform raw file was found after simulation.\n")
+            self.wave.set_signals({})
+            return
+
+        try:
+            signals = NgspiceRawParser.load_signals(raw_path)
+        except (OSError, ValueError) as exc:
+            append_log(self.log, f"Failed to load waveform data: {exc}\n")
+            self.wave.set_signals({})
+            return
+
+        self.wave.set_signals(signals)
+        append_log(self.log, f"Loaded waveform data from: {raw_path}\n")
+
+    def _resolve_raw_path(self) -> Path | None:
+        candidates: list[Path] = []
+        if self._last_raw_path:
+            candidates.append(self._last_raw_path)
+        if self._last_outputs:
+            candidates.extend(sorted(self._last_outputs.results.glob("*.raw")))
+            candidates.extend(sorted(self._last_outputs.base.glob("*.raw")))
+
+        seen: set[Path] = set()
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if candidate.exists() and candidate.is_file():
+                return candidate
+        return None
