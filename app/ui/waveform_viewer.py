@@ -90,6 +90,7 @@ class WaveformViewer(QWidget):
             return
         x, y = self._signals[name]
         self.plot.setTitle(f"Waveform Viewer · {name}")
+        self._apply_axis_labels(name)
         self.plot.plot(x, y, pen=pg.mkPen("#00d4ff", width=2))
         self._capture_base_ranges(x, y)
         self._apply_scale()
@@ -151,3 +152,18 @@ class WaveformViewer(QWidget):
 
     def signal_data(self, name: str) -> tuple[list[float], list[float]] | None:
         return self._signals.get(name)
+
+    def _apply_axis_labels(self, signal_name: str) -> None:
+        if "frequency" in self._signals and signal_name != "time":
+            self.plot.setLabel("bottom", "Frequency")
+        else:
+            self.plot.setLabel("bottom", "Time")
+
+        if signal_name.startswith("mag("):
+            self.plot.setLabel("left", "Magnitude", units="dB")
+        elif signal_name.startswith("phase("):
+            self.plot.setLabel("left", "Phase", units="deg")
+        elif signal_name.startswith("i("):
+            self.plot.setLabel("left", "Current", units="A")
+        else:
+            self.plot.setLabel("left", "Value")

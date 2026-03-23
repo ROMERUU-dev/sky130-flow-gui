@@ -90,7 +90,7 @@ class SimulationTab(QWidget):
         self.edit_netlist_btn.setChecked(False)
 
         self.sim_type = QComboBox()
-        self.sim_type.addItems(["Transient", "DC"])
+        self.sim_type.addItems(["Transient", "AC", "DC"])
         self.sim_stack = QStackedWidget()
         self.content_tabs = QTabWidget()
         self.log_dialog: QDialog | None = None
@@ -559,12 +559,13 @@ class SimulationTab(QWidget):
             self.spectrum_plot.hide()
             return
 
-        self.metric_labels["minimum"].setText(format_value(metrics.minimum, "V"))
-        self.metric_labels["maximum"].setText(format_value(metrics.maximum, "V"))
-        self.metric_labels["mean"].setText(format_value(metrics.mean, "V"))
-        self.metric_labels["rms"].setText(format_value(metrics.rms, "V"))
-        self.metric_labels["peak_to_peak"].setText(format_value(metrics.peak_to_peak, "V"))
-        self.metric_labels["amplitude"].setText(format_value(metrics.amplitude, "V"))
+        unit = self._signal_unit(signal_name)
+        self.metric_labels["minimum"].setText(format_value(metrics.minimum, unit))
+        self.metric_labels["maximum"].setText(format_value(metrics.maximum, unit))
+        self.metric_labels["mean"].setText(format_value(metrics.mean, unit))
+        self.metric_labels["rms"].setText(format_value(metrics.rms, unit))
+        self.metric_labels["peak_to_peak"].setText(format_value(metrics.peak_to_peak, unit))
+        self.metric_labels["amplitude"].setText(format_value(metrics.amplitude, unit))
         if metrics.x_label == "time":
             self.metric_labels["frequency_hz"].setText(format_value(metrics.frequency_hz, "Hz"))
             self.metric_labels["period_s"].setText(format_value(metrics.period_s, "s"))
@@ -584,6 +585,16 @@ class SimulationTab(QWidget):
     def _clear_measurements(self) -> None:
         for label in self.metric_labels.values():
             label.setText("N/A")
+
+    @staticmethod
+    def _signal_unit(signal_name: str) -> str:
+        if signal_name.startswith("mag("):
+            return "dB"
+        if signal_name.startswith("phase("):
+            return "deg"
+        if signal_name.startswith("i("):
+            return "A"
+        return "V"
 
     def _toggle_netlist_editor(self, checked: bool) -> None:
         self.netlist_editor_box.setVisible(checked)

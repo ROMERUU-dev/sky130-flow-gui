@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import struct
+import math
 from pathlib import Path
 
 
 class NgspiceRawParser:
-    """Load simple real-valued ngspice binary raw files."""
+    """Load real and complex ngspice binary raw files."""
 
     @staticmethod
     def load_signals(raw_path: str | Path) -> dict[str, tuple[list[float], list[float]]]:
@@ -21,7 +22,8 @@ class NgspiceRawParser:
 
         header_text = data[:marker_idx].decode(errors="replace")
         header = NgspiceRawParser._parse_header(header_text)
-        if header["flags"] != "real":
+        flags = str(header["flags"])
+        if flags not in {"real", "complex"}:
             raise ValueError(f"Unsupported ngspice flags '{header['flags']}' in {path}")
 
         num_vars = header["num_variables"]
@@ -30,7 +32,8 @@ class NgspiceRawParser:
             return {}
 
         payload = data[marker_idx + len(marker) :]
-        expected_size = num_vars * num_points * 8
+        value_size = 8 if flags == "real" else 16
+        expected_size = num_vars * num_points * value_size
         if len(payload) < expected_size:
             raise ValueError(f"Incomplete raw payload in {path}")
 
@@ -38,17 +41,36 @@ class NgspiceRawParser:
         names = header["variables"]
         x_name = names[0]
 
-        rows = struct.iter_unpack(f"<{num_vars}d", payload[:expected_size])
-        x_values: list[float] = []
-        y_values: dict[str, list[float]] = {name: [] for name in names[1:]}
+        if flags == "real":
+            rows = struct.iter_unpack(f"<{num_vars}d", payload[:expected_size])
+            x_values: list[float] = []
+            y_values: dict[str, list[float]] = {name: [] for name in names[1:]}
 
-        for row in rows:
-            x_values.append(float(row[0]))
-            for idx, name in enumerate(names[1:], start=1):
-                y_values[name].append(float(row[idx]))
+            for row in rows:
+                x_values.append(float(row[0]))
+                for idx, name in enumerate(names[1:], start=1):
+                    y_values[name].append(float(row[idx]))
 
-        for name in names[1:]:
-            signals[name] = (x_values, y_values[name])
+            for name in names[1:]:
+                signals[name] = (x_values, y_values[name])
+        else:
+            rows = struct.iter_unpack(f"<{num_vars * 2}d", payload[:expected_size])
+            x_values: list[float] = []
+            magnitude_values: dict[str, list[float]] = {name: [] for name in names[1:]}
+            phase_values: dict[str, list[float]] = {name: [] for name in names[1:]}
+
+            for row in rows:
+                x_values.append(float(row[0]))
+                for idx, name in enumerate(names[1:], start=1):
+                    real = float(row[idx * 2])
+                    imag = float(row[idx * 2 + 1])
+                    magnitude = math.hypot(real, imag)
+                    magnitude_values[name].append(20.0 * math.log10(max(magnitude, 1e-30)))
+                    phase_values[name].append(math.degrees(math.atan2(imag, real)))
+
+            for name in names[1:]:
+                signals[f"mag({name})"] = (x_values, magnitude_values[name])
+                signals[f"phase({name})"] = (x_values, phase_values[name])
 
         # Expose the independent variable too in case the user wants to inspect it directly.
         signals[x_name] = (list(range(len(x_values))), x_values)
