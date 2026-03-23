@@ -93,7 +93,7 @@ class MainWindow(QMainWindow):
         self.settings_mgr.save(self.app_settings)
 
     def _receive_extracted_netlist(self, netlist_path: str) -> None:
-        self.sim_tab.netlist_edit.setText(netlist_path)
+        self.sim_tab.load_netlist_path(netlist_path)
         self.tabs.setCurrentWidget(self.sim_tab)
 
     def _on_settings_updated(self, new_settings: AppSettings) -> None:
