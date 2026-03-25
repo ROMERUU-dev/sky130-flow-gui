@@ -9,6 +9,7 @@ from pathlib import Path
 import pyqtgraph as pg
 import pyqtgraph.exporters
 from PySide6.QtCore import QSignalBlocker
+from PySide6.QtCore import Qt
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QSizePolicy
@@ -29,6 +30,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
@@ -49,6 +52,15 @@ from app.core.spice_tools import (
     format_value,
 )
 from app.runners.ngspice_runner import NgspiceRunner
+from app.services.em_netlist_instrumentation import (
+    ensure_em_workspace,
+    inspect_internal_net_candidates,
+    instrument_netlist_for_em,
+    normalize_em_current_file,
+    preview_manual_instrumentation,
+    write_manual_instrumented_netlist,
+    write_em_probe_map,
+)
 from app.ui.waveform_viewer import WaveformViewer
 from app.ui.widgets import append_log
 
@@ -189,6 +201,18 @@ class SimulationTab(QWidget):
         self.metric_signal = QComboBox()
         self.metric_reference = QComboBox()
         self.metric_reference.addItem("None", "")
+        self.generate_em_checkbox = QCheckBox(pick(self.lang, "Generar análisis EM (netlist instrumentado)", "Generate EM analysis (instrumented netlist)"))
+        self.debug_em_only_checkbox = QCheckBox(pick(self.lang, "Debug: exportar sólo netlist instrumentado", "Debug: export instrumented netlist only"))
+        self.keep_em_files_checkbox = QCheckBox(pick(self.lang, "Conservar archivos intermedios EM", "Keep EM intermediate files"))
+        self.em_project_mode = QComboBox()
+        self.em_project_mode.addItem("Tiny Tapeout", "tiny_tapeout")
+        self.em_project_mode.addItem("Custom SKY130", "custom_sky130")
+        self.open_em_netlists_btn = QPushButton(pick(self.lang, "Abrir carpeta de netlists EM", "Open EM netlist folder"))
+        self.open_em_inputs_btn = QPushButton(pick(self.lang, "Abrir carpeta de inputs EM", "Open EM inputs folder"))
+        self.internal_net_combo = QComboBox()
+        self.internal_connections_table = QTableWidget(0, 4)
+        self.preview_internal_btn = QPushButton(pick(self.lang, "Previsualizar instrumentación", "Preview instrumentation"))
+        self.apply_internal_btn = QPushButton(pick(self.lang, "Aplicar instrumentación para esta net", "Apply instrumentation for this net"))
         self.metric_labels = {
             "minimum": QLabel("N/A"),
             "maximum": QLabel("N/A"),
@@ -207,6 +231,11 @@ class SimulationTab(QWidget):
         self._last_outputs: OutputPaths | None = None
         self._last_raw_path: Path | None = None
         self._last_generated_netlist: Path | None = None
+        self._pending_em_run = None
+        self._running_em_followup = False
+        self._em_workspace_paths: dict[str, Path] = {}
+        self._last_em_metadata_path: Path | None = None
+        self._internal_net_candidates: list[dict] = []
         self._spectrum_base_x_range: tuple[float, float] | None = None
         self._spectrum_base_y_range: tuple[float, float] | None = None
         self._current_spectrum_signal_name = ""
@@ -270,6 +299,7 @@ class SimulationTab(QWidget):
 
         page_layout.addWidget(self._build_simulation_setup())
         page_layout.addWidget(self._build_probe_editor())
+        page_layout.addWidget(self._build_internal_net_inspector())
         netlist_tools = QHBoxLayout()
         netlist_tools.addWidget(self.edit_netlist_btn)
         netlist_tools.addWidget(self.paste_netlist_btn)
@@ -291,6 +321,14 @@ class SimulationTab(QWidget):
         form.addRow(pick(self.lang, "Modo de guardado:", "Save mode:"), self.save_mode)
         form.addRow(pick(self.lang, "Corner:", "Corner:"), self.corner)
         form.addRow(pick(self.lang, "Temperatura (C):", "Temperature (C):"), self.temp_c)
+        form.addRow("", self.generate_em_checkbox)
+        form.addRow("", self.debug_em_only_checkbox)
+        form.addRow("", self.keep_em_files_checkbox)
+        form.addRow(pick(self.lang, "Proyecto EM:", "EM Project Mode:"), self.em_project_mode)
+        em_folder_row = QHBoxLayout()
+        em_folder_row.addWidget(self.open_em_netlists_btn)
+        em_folder_row.addWidget(self.open_em_inputs_btn)
+        form.addRow("", em_folder_row)
 
         tran_page = QWidget()
         tran_form = QFormLayout(tran_page)
@@ -345,6 +383,31 @@ class SimulationTab(QWidget):
         self.probe_layout = QVBoxLayout(container)
         self.probe_layout.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(container)
+        return box
+
+    def _build_internal_net_inspector(self) -> QWidget:
+        box = QGroupBox("Internal Net Inspector")
+        outer = QVBoxLayout(box)
+        top = QHBoxLayout()
+        top.addWidget(QLabel(pick(self.lang, "Selecciona net interna:", "Select internal net:")))
+        top.addWidget(self.internal_net_combo, 1)
+        outer.addLayout(top)
+
+        self.internal_connections_table.setHorizontalHeaderLabels(
+            [
+                pick(self.lang, "Instancia", "Instance name"),
+                pick(self.lang, "Tipo", "Type"),
+                pick(self.lang, "Línea", "Line preview"),
+                pick(self.lang, "Mover al lado driver", "Move to driver side"),
+            ]
+        )
+        outer.addWidget(self.internal_connections_table)
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.preview_internal_btn)
+        buttons.addWidget(self.apply_internal_btn)
+        buttons.addStretch(1)
+        outer.addLayout(buttons)
         return box
 
     def _build_netlist_editor(self) -> QWidget:
@@ -412,6 +475,7 @@ class SimulationTab(QWidget):
         self.refresh_points_btn.clicked.connect(self._refresh_probe_points)
         self.sim_type.currentIndexChanged.connect(self.sim_stack.setCurrentIndex)
         self.file_view.textChanged.connect(self._refresh_probe_points)
+        self.file_view.textChanged.connect(self._refresh_internal_net_inspector)
         self.metric_signal.currentTextChanged.connect(self._update_measurements)
         self.metric_reference.currentTextChanged.connect(self._update_measurements)
         self.spectrum_mode.currentTextChanged.connect(self._update_measurements)
@@ -425,10 +489,20 @@ class SimulationTab(QWidget):
         self.wave.signal_changed.connect(self._sync_metric_selection)
         self.edit_netlist_btn.toggled.connect(self._toggle_netlist_editor)
         self.paste_netlist_btn.clicked.connect(self._paste_netlist)
+        self.generate_em_checkbox.toggled.connect(self._sync_em_options_state)
+        self.debug_em_only_checkbox.toggled.connect(self._sync_em_options_state)
+        self.em_project_mode.currentIndexChanged.connect(self._refresh_internal_net_inspector)
+        self.open_em_netlists_btn.clicked.connect(self._open_em_netlists_folder)
+        self.open_em_inputs_btn.clicked.connect(self._open_em_inputs_folder)
+        self.internal_net_combo.currentIndexChanged.connect(self._populate_internal_net_table)
+        self.preview_internal_btn.clicked.connect(self._preview_internal_instrumentation)
+        self.apply_internal_btn.clicked.connect(self._apply_internal_instrumentation)
 
         self.runner.started.connect(lambda cmd: self._append_log(f"\n$ {cmd}\n"))
         self.runner.line_output.connect(self._append_log)
         self.runner.finished.connect(self._finished)
+        self._sync_em_options_state()
+        self._refresh_internal_net_inspector()
 
     def _pick_file(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(self, "Select netlist", "", "SPICE Files (*.spice *.sp *.cir)")
@@ -456,6 +530,19 @@ class SimulationTab(QWidget):
         generated_netlist = self._write_generated_netlist(outputs)
         self._last_generated_netlist = generated_netlist
         self.generated_path_edit.setText(str(generated_netlist))
+        self._pending_em_run = None
+        self._running_em_followup = False
+        if self._em_workflow_requested():
+            self._pending_em_run = self._prepare_em_followup(generated_netlist, outputs)
+            if self._pending_em_run and self._pending_em_run.get("debug_only"):
+                self._show_em_debug_summary(self._pending_em_run)
+                self._append_log(
+                    f"EM debug export generated.\n"
+                    f"Instrumented netlist: {self._pending_em_run['netlist_path']}\n"
+                    f"Probe map: {self._pending_em_run['metadata_path']}\n"
+                )
+                self.send_status.emit("EM instrumented netlist generated")
+                return
 
         cmd, log_path, raw_path, run_cwd = self.builder.run_spec(str(generated_netlist), outputs)
         self._append_log(f"Output folder: {outputs.results}\nGenerated netlist: {generated_netlist}\nLog file: {log_path}\n")
@@ -473,11 +560,62 @@ class SimulationTab(QWidget):
         self.run()
 
     def _finished(self, code: int, status: str) -> None:
+        if self._running_em_followup:
+            self._running_em_followup = False
+            self._set_simulation_running(False)
+            summary = f"\nEM extraction finished: exit={code} status={status}\n"
+            self._append_log(summary)
+            if code != 0:
+                self._pending_em_run = None
+                self.send_status.emit("EM extraction failed")
+            else:
+                try:
+                    normalization = normalize_em_current_file(
+                        raw_path=self._pending_em_run["raw_currents_path"],
+                        normalized_path=self._pending_em_run["currents_path"],
+                        probe_map_path=self._pending_em_run["metadata_path"],
+                    )
+                    self._append_log(
+                        f"Normalized EM current file: {normalization['normalized_path']}\n"
+                        f"Probe count: {normalization['probe_count']}\n"
+                    )
+                    for warning in normalization["warnings"]:
+                        self._append_log(f"EM normalization warning: {warning}\n")
+                except Exception as exc:
+                    self._append_log(f"EM normalization failed: {exc}\n")
+                    self._pending_em_run = None
+                    self.send_status.emit("EM extraction failed")
+                    return
+                self._cleanup_em_reports_if_needed()
+                self._pending_em_run = None
+                self.send_status.emit("Simulation completed")
+            return
+
+        if code == 0 and self._pending_em_run is not None:
+            summary = f"\nSimulation finished: exit={code} status={status}\n"
+            self._append_log(summary)
+            self._load_waveforms()
+            self.refresh_history()
+            if self._pending_em_run.get("debug_only"):
+                self._set_simulation_running(False)
+                self._pending_em_run = None
+                self.send_status.emit("EM instrumented netlist generated")
+                return
+            self._append_log(
+                f"Starting EM extraction using instrumented netlist: {self._pending_em_run['netlist_path']}\n"
+                f"EM current output: {self._pending_em_run['currents_path']}\n"
+            )
+            self.send_status.emit("EM extraction running")
+            self._running_em_followup = True
+            self.runner.run(self._pending_em_run["spec"])
+            return
+
         self._set_simulation_running(False)
         summary = f"\nSimulation finished: exit={code} status={status}\n"
         self._append_log(summary)
         full_text = self.log.toPlainText()
         if LogParser.has_errors(full_text) or code != 0:
+            self._pending_em_run = None
             self.send_status.emit("Simulation failed")
         else:
             self._load_waveforms()
@@ -583,6 +721,160 @@ class SimulationTab(QWidget):
         if not self._probe_rows:
             self._add_probe_row()
 
+    def _refresh_internal_net_inspector(self) -> None:
+        self._internal_net_candidates = inspect_internal_net_candidates(
+            self.file_view.toPlainText(),
+            project_mode=str(self.em_project_mode.currentData()),
+        )
+        self._append_log(f"Internal Net Inspector: found {len(self._internal_net_candidates)} candidate nets.\n")
+        current_net = self._normalized_net_name(self.internal_net_combo.currentData() or self.internal_net_combo.currentText())
+        self.internal_net_combo.blockSignals(True)
+        self.internal_net_combo.clear()
+        for candidate in self._internal_net_candidates:
+            self.internal_net_combo.addItem(candidate["net_name"], candidate["net_name"])
+        if current_net:
+            for index in range(self.internal_net_combo.count()):
+                candidate_name = self.internal_net_combo.itemData(index) or self.internal_net_combo.itemText(index)
+                if self._normalized_net_name(candidate_name) == current_net:
+                    self.internal_net_combo.setCurrentIndex(index)
+                    break
+        if self.internal_net_combo.count() and self.internal_net_combo.currentIndex() < 0:
+            self.internal_net_combo.setCurrentIndex(0)
+        self.internal_net_combo.blockSignals(False)
+        self._populate_internal_net_table()
+
+    def _populate_internal_net_table(self, *_args) -> None:
+        candidate = self._selected_internal_candidate()
+        self.internal_connections_table.clearContents()
+        if not candidate:
+            self.internal_connections_table.setRowCount(0)
+            self.preview_internal_btn.setEnabled(False)
+            self.apply_internal_btn.setEnabled(False)
+            selected_net = self.internal_net_combo.currentText().strip()
+            if selected_net:
+                self._append_log(f"Internal Net Inspector: no candidate matched selected net '{selected_net}'.\n")
+            return
+
+        elements = candidate["connected_elements"]
+        self._append_log(
+            f"Internal Net Inspector: selected net '{candidate['net_name']}' has {len(elements)} connected top-level statements.\n"
+        )
+        self.internal_connections_table.setRowCount(len(elements))
+        has_driver = False
+        for row, element in enumerate(elements):
+            instance_item = QTableWidgetItem(element["instance_name"])
+            type_item = QTableWidgetItem(element["classification"])
+            line_item = QTableWidgetItem(element["line_preview"])
+            move_item = QTableWidgetItem()
+            move_item.setFlags(move_item.flags() | Qt.ItemIsUserCheckable)
+            checked = element["move_default"]
+            move_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+            if element["classification"] == "driver":
+                has_driver = True
+            self._append_log(
+                f"  - {element['instance_name']} ({element['statement_type']}) [{element['classification']}]\n"
+            )
+            self.internal_connections_table.setItem(row, 0, instance_item)
+            self.internal_connections_table.setItem(row, 1, type_item)
+            self.internal_connections_table.setItem(row, 2, line_item)
+            self.internal_connections_table.setItem(row, 3, move_item)
+        self.internal_connections_table.resizeColumnsToContents()
+        can_apply = len(elements) >= 2 and has_driver
+        self.preview_internal_btn.setEnabled(can_apply)
+        self.apply_internal_btn.setEnabled(can_apply)
+
+    def _selected_internal_candidate(self) -> dict | None:
+        net_name = self._normalized_net_name(self.internal_net_combo.currentData() or self.internal_net_combo.currentText())
+        if not net_name:
+            return None
+        for candidate in self._internal_net_candidates:
+            if self._normalized_net_name(candidate["net_name"]) == net_name:
+                return candidate
+        return None
+
+    def _selected_internal_driver_statements(self) -> list[str]:
+        candidate = self._selected_internal_candidate()
+        if not candidate:
+            return []
+        selected: list[str] = []
+        for row, element in enumerate(candidate["connected_elements"]):
+            item = self.internal_connections_table.item(row, 3)
+            if item and item.checkState() == Qt.Checked:
+                selected.append(element["instance_name"])
+        return selected
+
+    def _preview_internal_instrumentation(self) -> None:
+        candidate = self._selected_internal_candidate()
+        if not candidate:
+            return
+        moved_statements = self._selected_internal_driver_statements()
+        if not moved_statements:
+            QMessageBox.warning(self, "EM Manual", "Select at least one driver-side statement to move.")
+            return
+        try:
+            preview = preview_manual_instrumentation(
+                self.file_view.toPlainText(),
+                candidate["net_name"],
+                moved_statements,
+                self._ensure_em_workspace_dirs()["inputs"] / "preview_manual_currents.txt",
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "EM Manual", str(exc))
+            return
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("EM Manual Preview")
+        dialog.setText(f"Preview for internal net {candidate['net_name']}")
+        dialog.setDetailedText(preview["preview_text"])
+        dialog.exec()
+
+    def _apply_internal_instrumentation(self) -> None:
+        candidate = self._selected_internal_candidate()
+        if not candidate:
+            return
+        moved_statements = self._selected_internal_driver_statements()
+        if not moved_statements:
+            QMessageBox.warning(self, "EM Manual", "Select at least one driver-side statement to move.")
+            return
+        if len(candidate["connected_elements"]) < 2:
+            QMessageBox.warning(self, "EM Manual", "Internal net requires at least two connected top-level elements.")
+            return
+        if all(element["classification"] == "passive" for element in candidate["connected_elements"]):
+            QMessageBox.warning(self, "EM Manual", "Only passive elements are connected to this net. Skipping instrumentation.")
+            return
+
+        paths = self._ensure_em_workspace_dirs()
+        run_name = self._compact_timestamp()
+        netlist_path = paths["netlists"] / f"{run_name}__emprobe_manual.spice"
+        map_path = paths["netlists"] / f"{run_name}__emprobe_manual_map.json"
+        currents_path = paths["inputs"] / f"{run_name}_currents_manual.txt"
+        try:
+            metadata = write_manual_instrumented_netlist(
+                source_text=self.file_view.toPlainText(),
+                output_netlist_path=netlist_path,
+                probe_map_path=map_path,
+                net_name=candidate["net_name"],
+                moved_statements=moved_statements,
+                wrdata_output=currents_path,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "EM Manual", str(exc))
+            return
+        self._last_em_metadata_path = map_path
+        self._append_log(
+            f"Manual EM instrumentation written:\n"
+            f"- Netlist: {netlist_path}\n"
+            f"- Probe map: {map_path}\n"
+        )
+        QMessageBox.information(
+            self,
+            "EM Manual",
+            f"Manual instrumentation created:\n{netlist_path}\n\nMoved statements:\n" + "\n".join(f"- {name}" for name in moved_statements),
+        )
+
+    @staticmethod
+    def _normalized_net_name(value: str | None) -> str:
+        return (value or "").strip().lower()
+
     def _add_probe_row(self, initial_text: str = "") -> None:
         row = QHBoxLayout()
         combo = QComboBox()
@@ -669,6 +961,95 @@ class SimulationTab(QWidget):
             extraction=base_outputs.extraction,
             antenna=base_outputs.antenna,
         )
+
+    def _prepare_em_followup(self, generated_netlist: Path, outputs: OutputPaths):
+        try:
+            repo_root = Path(__file__).resolve().parents[2]
+            self._em_workspace_paths = ensure_em_workspace(repo_root)
+            run_name = outputs.results.name
+            instrumented_path = self._em_workspace_paths["netlists"] / f"{run_name}__emprobe.spice"
+            currents_path = self._em_workspace_paths["inputs"] / f"{run_name}_currents.txt"
+            raw_currents_path = self._em_workspace_paths["reports"] / f"{run_name}_currents_raw.txt"
+            metadata_path = self._em_workspace_paths["netlists"] / f"{run_name}__emprobe_map.json"
+            em_log_path = self._em_workspace_paths["reports"] / f"{run_name}_em_ngspice.log"
+            em_raw_path = self._em_workspace_paths["reports"] / f"{run_name}_em.raw"
+            metadata = instrument_netlist_for_em(
+                input_netlist_path=str(generated_netlist),
+                output_netlist_path=str(instrumented_path),
+                config={
+                    "project_mode": str(self.em_project_mode.currentData()),
+                    "wrdata_output": str(raw_currents_path),
+                },
+            )
+            write_em_probe_map(metadata_path, metadata)
+            self._last_em_metadata_path = metadata_path
+            command = [
+                self.settings.tool_paths.ngspice,
+                "-b",
+                "-o",
+                str(em_log_path),
+                "-r",
+                str(em_raw_path),
+                str(instrumented_path),
+            ]
+            self._append_log(
+                f"Prepared EM instrumented netlist: {instrumented_path}\n"
+                f"EM probe map: {metadata_path}\n"
+            )
+            return {
+                "spec": self.builder.build(command, cwd=str(self._em_workspace_paths["reports"])),
+                "netlist_path": instrumented_path,
+                "currents_path": currents_path,
+                "raw_currents_path": raw_currents_path,
+                "metadata_path": metadata_path,
+                "metadata": metadata,
+                "debug_only": self.debug_em_only_checkbox.isChecked(),
+                "report_paths": [em_log_path, em_raw_path],
+            }
+        except Exception as exc:
+            self._append_log(f"EM instrumentation skipped: {exc}\n")
+            self.send_status.emit("EM instrumentation skipped")
+            return None
+
+    def _em_workflow_requested(self) -> bool:
+        return self.generate_em_checkbox.isChecked() or self.debug_em_only_checkbox.isChecked()
+
+    def _sync_em_options_state(self) -> None:
+        em_enabled = self._em_workflow_requested()
+        self.em_project_mode.setEnabled(em_enabled)
+        self.keep_em_files_checkbox.setEnabled(em_enabled)
+
+    def _ensure_em_workspace_dirs(self) -> dict[str, Path]:
+        if not self._em_workspace_paths:
+            repo_root = Path(__file__).resolve().parents[2]
+            self._em_workspace_paths = ensure_em_workspace(repo_root)
+        return self._em_workspace_paths
+
+    def _open_em_netlists_folder(self) -> None:
+        paths = self._ensure_em_workspace_dirs()
+        QDesktopServices.openUrl(paths["netlists"].as_uri())
+
+    def _open_em_inputs_folder(self) -> None:
+        paths = self._ensure_em_workspace_dirs()
+        QDesktopServices.openUrl(paths["inputs"].as_uri())
+
+    def _show_em_debug_summary(self, em_run: dict) -> None:
+        lines = [f"Instrumented netlist generated:\n{em_run['netlist_path']}"]
+        nets = [item["original_net"] for item in em_run["metadata"].get("probes", [])]
+        if nets:
+            lines.append("")
+            lines.append("Instrumented nets:")
+            lines.extend(f"- {net}" for net in nets)
+        QMessageBox.information(self, "EM Debug", "\n".join(lines))
+
+    def _cleanup_em_reports_if_needed(self) -> None:
+        if self.keep_em_files_checkbox.isChecked() or not self._pending_em_run:
+            return
+        for path in self._pending_em_run.get("report_paths", []):
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def _refresh_measurement_targets(self) -> None:
         signal_names = self.wave.signal_names()

@@ -12,6 +12,7 @@ It **does not replace** xschem, magic, klayout, ngspice, or netgen; it orchestra
   - LVS (`netgen`)
   - Extraction/Post-layout (`magic`)
   - Antenna Check (`klayout`)
+  - EM Sizing (`ngspice` current waveform analysis for routing estimates)
   - Project/Files
   - Preferences
 - Persistent preferences and recent projects (`QSettings`)
@@ -44,12 +45,19 @@ app/
     antenna_runner.py
   resources/
     sky130-flow-gui.svg
+  data/
+    sky130_em_profiles.json
+  models/
+    em_models.py
+  services/
+    em_service.py
   ui/
     main_window.py
     simulation_tab.py
     lvs_tab.py
     extraction_tab.py
     antenna_tab.py
+    em_sizing_tab.py
     project_tab.py
     preferences_tab.py
     waveform_viewer.py
@@ -72,6 +80,55 @@ pip install -r requirements.txt
 ```bash
 python -m app.main
 ```
+
+## Simulation Guide
+
+- Detailed Spanish guide for the simulation/visualization workflow:
+  - `docs/SIMULATION_GUIDE_ES.md`
+
+## EM Sizing Tab
+
+The **EM Sizing** tab is an engineering support tool for reviewing branch currents exported from `ngspice` and estimating interconnect sizing decisions for manual SKY130 / Tiny Tapeout routing.
+
+It can:
+
+- Load current waveform files from `ngspice` outputs
+- Support CSV and whitespace-separated `wrdata`-style text files
+- Compute `I_avg`, `I_rms`, and `I_peak`
+- Classify branches as `power`, `output`, or `signal`
+- Apply `average`, `rms`, `peak`, or conservative `auto` design-metric selection
+- Recommend metal width from estimated current-density rules plus DRC minimum and routing-grid rounding
+- Recommend via count and a compact via array
+- Export results to CSV, JSON, and plain text
+
+Important limits:
+
+- This is an **engineering estimation tool**, not official foundry EM signoff.
+- EM/current-density values in `app/data/sky130_em_profiles.json` are configurable, conservative, user-defined estimates.
+- DRC minimum width and EM sizing are handled separately in the calculations and UI.
+- Final signoff must still use foundry-qualified rules and the proper signoff flow.
+
+Supported waveform file shape:
+
+- First column must be time
+- Remaining columns are current branches
+- Header row is optional
+- Scientific notation, blank lines, extra spaces, and simple comment lines are accepted
+
+Profile units:
+
+- thickness: `um`
+- minimum width: `um`
+- routing grid: `um`
+- current density: `mA/um^2`
+- via current: `mA`
+
+Example usage:
+
+1. Export branch current waveforms from `ngspice` to CSV or whitespace-separated text.
+2. Open **EM Sizing** and load the file or use **Load Latest Result**.
+3. Choose the profile, design metric, target metal, via type, and margin factor.
+4. Review per-branch recommendations, warnings, and the detail panel before routing in Magic.
 
 ## SKY130 Environment Assumptions
 
@@ -104,6 +161,7 @@ python -m app.main
 
 - Waveform plotting is ready to receive real parsed simulation traces (no dummy/example traces are shown by default).
 - Log parsing is heuristic/simple and intended as a starting point.
+- EM sizing rules are conservative estimates and are not signoff-qualified.
 
 ## Phase 2 Suggestions
 

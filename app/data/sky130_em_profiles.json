@@ -1,0 +1,72 @@
+{
+  "profiles": {
+    "sky130_conservative": {
+      "notes": "Engineering estimate profile for SKY130 and Tiny Tapeout style manual routing. Not official foundry EM signoff data.",
+      "safety_note": "Use these values as conservative user-defined guidance only. Final EM signoff must use foundry-qualified data and signoff flow.",
+      "metals": {
+        "li1": {
+          "thickness_um": 0.10,
+          "minimum_width_um": 0.17,
+          "routing_grid_um": 0.005,
+          "allowed_current_density_ma_per_um2": 0.80,
+          "default_via": "licon"
+        },
+        "met1": {
+          "thickness_um": 0.36,
+          "minimum_width_um": 0.17,
+          "routing_grid_um": 0.005,
+          "allowed_current_density_ma_per_um2": 1.20,
+          "default_via": "mcon"
+        },
+        "met2": {
+          "thickness_um": 0.36,
+          "minimum_width_um": 0.14,
+          "routing_grid_um": 0.005,
+          "allowed_current_density_ma_per_um2": 1.35,
+          "default_via": "via"
+        },
+        "met3": {
+          "thickness_um": 0.845,
+          "minimum_width_um": 0.30,
+          "routing_grid_um": 0.005,
+          "allowed_current_density_ma_per_um2": 1.70,
+          "default_via": "via2"
+        },
+        "met4": {
+          "thickness_um": 0.845,
+          "minimum_width_um": 0.30,
+          "routing_grid_um": 0.005,
+          "allowed_current_density_ma_per_um2": 1.90,
+          "default_via": "via3"
+        },
+        "met5": {
+          "thickness_um": 1.26,
+          "minimum_width_um": 1.60,
+          "routing_grid_um": 0.010,
+          "allowed_current_density_ma_per_um2": 2.20,
+          "default_via": "via4"
+        }
+      },
+      "vias": {
+        "licon": {
+          "allowed_current_ma": 0.40
+        },
+        "mcon": {
+          "allowed_current_ma": 0.80
+        },
+        "via": {
+          "allowed_current_ma": 1.20
+        },
+        "via2": {
+          "allowed_current_ma": 2.00
+        },
+        "via3": {
+          "allowed_current_ma": 2.80
+        },
+        "via4": {
+          "allowed_current_ma": 4.50
+        }
+      }
+    }
+  }
+}

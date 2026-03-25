@@ -13,10 +13,8 @@ class NgspiceRunner(BaseRunner):
     """Build ngspice commands for batch simulation."""
 
     def run_spec(self, netlist: str, outputs: OutputPaths) -> tuple[list[str], str, str, str]:
-        netlist_stem = Path(netlist).stem or "simulation"
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path = str(outputs.logs / f"{netlist_stem}_{timestamp}_ngspice.log")
-        raw_out = str(outputs.results / f"{netlist_stem}_{timestamp}.raw")
+        log_path = str(outputs.logs / "log.txt")
+        raw_out = str(outputs.results / "raw.raw")
         run_cwd = str(outputs.results)
 
         self.ensure_parent(log_path)

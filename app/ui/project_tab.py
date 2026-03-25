@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.i18n import pick
 from app.core.project_manager import ProjectManager
 
 
@@ -25,12 +26,13 @@ class ProjectTab(QWidget):
 
     project_changed = Signal(str)
 
-    def __init__(self, manager: ProjectManager, recent_projects: list[str]) -> None:
+    def __init__(self, manager: ProjectManager, recent_projects: list[str], language: str = "es") -> None:
         super().__init__()
         self.manager = manager
         self.recent_projects = recent_projects
+        self.lang = language
 
-        self.current_label = QLabel("No project selected")
+        self.current_label = QLabel(pick(self.lang, "No hay proyecto seleccionado", "No project selected"))
         self.files = QListWidget()
         self.recent = QListWidget()
         self.info = QTextEdit()
@@ -44,27 +46,27 @@ class ProjectTab(QWidget):
         layout = QVBoxLayout(self)
 
         row = QHBoxLayout()
-        pick = QPushButton("Select Project Folder")
-        pick.clicked.connect(self.pick_project)
-        row.addWidget(pick)
+        pick_btn = QPushButton(pick(self.lang, "Seleccionar carpeta de proyecto", "Select Project Folder"))
+        pick_btn.clicked.connect(self.pick_project)
+        row.addWidget(pick_btn)
 
-        open_results = QPushButton("Open Runs/Results")
+        open_results = QPushButton(pick(self.lang, "Abrir Runs/Results", "Open Runs/Results"))
         open_results.clicked.connect(lambda: self._open_output_subfolder("results"))
         row.addWidget(open_results)
 
-        open_logs = QPushButton("Open Runs/Logs")
+        open_logs = QPushButton(pick(self.lang, "Abrir Runs/Logs", "Open Runs/Logs"))
         open_logs.clicked.connect(lambda: self._open_output_subfolder("logs"))
         row.addWidget(open_logs)
 
-        open_workspace = QPushButton("Open Active Output Root")
+        open_workspace = QPushButton(pick(self.lang, "Abrir raíz de outputs activa", "Open Active Output Root"))
         open_workspace.clicked.connect(self._open_output_root)
         row.addWidget(open_workspace)
 
         layout.addLayout(row)
         layout.addWidget(self.current_label)
-        layout.addWidget(QLabel("Detected Flow Files"))
+        layout.addWidget(QLabel(pick(self.lang, "Archivos detectados del flujo", "Detected Flow Files")))
         layout.addWidget(self.files)
-        layout.addWidget(QLabel("Recent Projects"))
+        layout.addWidget(QLabel(pick(self.lang, "Proyectos recientes", "Recent Projects")))
         layout.addWidget(self.recent)
         layout.addWidget(self.info)
 
@@ -76,7 +78,7 @@ class ProjectTab(QWidget):
             self.recent.addItem(item)
 
     def pick_project(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select project")
+        path = QFileDialog.getExistingDirectory(self, pick(self.lang, "Selecciona proyecto", "Select project"))
         if path:
             self.set_project(path)
 
@@ -93,7 +95,7 @@ class ProjectTab(QWidget):
 
     def _refresh_context_label(self) -> None:
         outputs = self.manager.outputs()
-        self.current_label.setText(f"Active output root: {outputs.runs}")
+        self.current_label.setText(f"{pick(self.lang, 'Raíz activa de outputs', 'Active output root')}: {outputs.runs}")
 
     def _index_files(self) -> None:
         found = self.manager.find_common_files()
@@ -104,7 +106,7 @@ class ProjectTab(QWidget):
             for file in files[:25]:
                 self.files.addItem(f"[{category}] {file}")
         if not summary:
-            summary.append("No project selected; using fallback workspace outputs.")
+            summary.append(pick(self.lang, "No hay proyecto seleccionado; se usarán outputs del workspace.", "No project selected; using fallback workspace outputs."))
         self.info.setPlainText("\n".join(summary))
 
     def _open_recent(self) -> None:

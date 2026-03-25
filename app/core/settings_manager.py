@@ -33,6 +33,7 @@ class AppSettings:
     pdk_paths: PdkPaths = field(default_factory=PdkPaths)
     recent_projects: list[str] = field(default_factory=list)
     last_project: str = ""
+    language: str = "es"
 
 
 class SettingsManager:
@@ -65,6 +66,7 @@ class SettingsManager:
             pdk_paths=pdk_paths,
             recent_projects=list(recent_projects),
             last_project=self._settings.value("projects/last", "", type=str),
+            language=self._settings.value("ui/language", "es", type=str),
         )
 
     def save(self, app_settings: AppSettings) -> None:
@@ -83,6 +85,7 @@ class SettingsManager:
 
         self._settings.setValue("projects/recent", app_settings.recent_projects)
         self._settings.setValue("projects/last", app_settings.last_project)
+        self._settings.setValue("ui/language", app_settings.language)
         self._settings.sync()
 
     def export_to_dict(self, app_settings: AppSettings) -> dict[str, Any]:
@@ -93,6 +96,9 @@ class SettingsManager:
             "projects": {
                 "recent": app_settings.recent_projects,
                 "last": app_settings.last_project,
+            },
+            "ui": {
+                "language": app_settings.language,
             },
         }
 

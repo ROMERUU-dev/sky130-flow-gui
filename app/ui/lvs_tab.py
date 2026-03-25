@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.command_runner import CommandRunner
+from app.core.i18n import pick
 from app.core.log_parser import LogParser
 from app.core.settings_manager import AppSettings
 from app.runners.lvs_runner import LvsRunner
@@ -32,6 +33,7 @@ class LvsTab(QWidget):
     def __init__(self, settings: AppSettings, outputs_getter) -> None:
         super().__init__()
         self.settings = settings
+        self.lang = settings.language
         self.outputs_getter = outputs_getter
         self.builder = LvsRunner(settings)
         self.runner = CommandRunner()
@@ -52,7 +54,7 @@ class LvsTab(QWidget):
     def _file_row(self, edit: QLineEdit, title: str, filt: str = "All Files (*)") -> QHBoxLayout:
         row = QHBoxLayout()
         row.addWidget(edit)
-        b = QPushButton("Browse")
+        b = QPushButton(pick(self.lang, "Buscar", "Browse"))
         b.clicked.connect(lambda: self._pick(edit, title, filt))
         row.addWidget(b)
         return row
@@ -60,24 +62,33 @@ class LvsTab(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         form = QFormLayout()
-        form.addRow("Layout/Extracted Netlist", self._file_row(self.layout_edit, "Select layout netlist", "Netlist (*.spice *.sp *.cir)"))
-        form.addRow("Schematic Netlist", self._file_row(self.schematic_edit, "Select schematic netlist", "Netlist (*.spice *.sp *.cir)"))
-        form.addRow("Netgen Setup Tcl", self._file_row(self.setup_edit, "Select netgen setup", "Tcl (*.tcl);;All Files (*)"))
+        form.addRow(
+            pick(self.lang, "Netlist de layout / extracción", "Layout/Extracted Netlist"),
+            self._file_row(self.layout_edit, pick(self.lang, "Selecciona netlist de layout", "Select layout netlist"), "Netlist (*.spice *.sp *.cir)"),
+        )
+        form.addRow(
+            pick(self.lang, "Netlist esquemático", "Schematic Netlist"),
+            self._file_row(self.schematic_edit, pick(self.lang, "Selecciona netlist esquemático", "Select schematic netlist"), "Netlist (*.spice *.sp *.cir)"),
+        )
+        form.addRow(
+            pick(self.lang, "Setup Tcl de netgen", "Netgen Setup Tcl"),
+            self._file_row(self.setup_edit, pick(self.lang, "Selecciona setup de netgen", "Select netgen setup"), "Tcl (*.tcl);;All Files (*)"),
+        )
 
         out_row = QHBoxLayout()
         out_row.addWidget(self.output_dir)
-        open_btn = QPushButton("Open Output Folder")
+        open_btn = QPushButton(pick(self.lang, "Abrir carpeta de salida", "Open Output Folder"))
         open_btn.clicked.connect(self.open_output_folder)
         out_row.addWidget(open_btn)
-        form.addRow("Output Dir", out_row)
+        form.addRow(pick(self.lang, "Directorio de salida", "Output Dir"), out_row)
 
         layout.addLayout(form)
 
         btns = QHBoxLayout()
-        run = QPushButton("Run")
-        stop = QPushButton("Stop")
-        clear = QPushButton("Clear log")
-        save = QPushButton("Export Report")
+        run = QPushButton(pick(self.lang, "Correr", "Run"))
+        stop = QPushButton(pick(self.lang, "Detener", "Stop"))
+        clear = QPushButton(pick(self.lang, "Limpiar log", "Clear log"))
+        save = QPushButton(pick(self.lang, "Exportar reporte", "Export Report"))
         btns.addWidget(run)
         btns.addWidget(stop)
         btns.addWidget(clear)
@@ -106,20 +117,29 @@ class LvsTab(QWidget):
         outputs = self.outputs_getter()
         self.output_dir.setText(str(outputs.lvs))
         cmd, report = self.builder.run_spec(self.layout_edit.text(), self.schematic_edit.text(), self.setup_edit.text(), outputs)
-        append_log(self.log, f"Output folder: {outputs.lvs}\nReport: {report}\n")
-        self.send_status.emit("LVS running")
+        append_log(
+            self.log,
+            f"{pick(self.lang, 'Carpeta de salida', 'Output folder')}: {outputs.lvs}\n"
+            f"{pick(self.lang, 'Reporte', 'Report')}: {report}\n",
+        )
+        self.send_status.emit(pick(self.lang, "LVS corriendo", "LVS running"))
         self.runner.run(self.builder.build(cmd, cwd=str(outputs.base)))
 
     def _finished(self, code: int, _status: str) -> None:
         text = self.log.toPlainText()
         summary = LogParser.lvs_summary(text)
         if code != 0:
-            summary = "LVS failed"
+            summary = pick(self.lang, "LVS falló", "LVS failed")
         self.summary.setText(summary)
         self.send_status.emit(summary)
 
     def export_report(self) -> None:
-        out, _ = QFileDialog.getSaveFileName(self, "Save LVS report", "lvs_report.txt", "Text (*.txt)")
+        out, _ = QFileDialog.getSaveFileName(
+            self,
+            pick(self.lang, "Guardar reporte LVS", "Save LVS report"),
+            "lvs_report.txt",
+            "Text (*.txt)",
+        )
         if out:
             Path(out).write_text(self.log.toPlainText())
 

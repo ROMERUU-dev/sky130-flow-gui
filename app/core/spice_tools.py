@@ -253,10 +253,15 @@ def _generated_directives(
     ]
 
     filtered_points = [normalize_save_point(point) for point in save_points if normalize_save_point(point)]
-    if filtered_points:
+    save_mode = analysis_params.get("save_mode", "All signals")
+    if save_mode == "Selected probes only" and filtered_points:
         directives.append(".save " + " ".join(filtered_points))
     else:
         directives.append(".save all")
+
+    temperature = analysis_params.get("temp_c", "").strip()
+    if temperature:
+        directives.append(f".temp {temperature}")
 
     if analysis_type == "AC":
         sweep = analysis_params.get("ac_sweep", "dec")
@@ -270,14 +275,20 @@ def _generated_directives(
         stop = analysis_params.get("dc_stop", "1.8")
         step = analysis_params.get("dc_step", "0.01")
         directives.append(f".dc {source} {start} {stop} {step}")
+    elif analysis_type == "Operating Point":
+        directives.append(".op")
     else:
         step = analysis_params.get("tran_step", "1n")
         stop = analysis_params.get("tran_stop", "1u")
         start = analysis_params.get("tran_start", "").strip()
+        use_uic = analysis_params.get("tran_uic", "").strip()
         if start:
-            directives.append(f".tran {step} {stop} {start}")
+            directive = f".tran {step} {stop} {start}"
         else:
-            directives.append(f".tran {step} {stop}")
+            directive = f".tran {step} {stop}"
+        if use_uic:
+            directive += " uic"
+        directives.append(directive)
 
     extra = extra_directives.strip()
     if extra:
@@ -361,3 +372,24 @@ def _largest_power_of_two(value: int) -> int:
 
 def _is_valid_node_name(token: str) -> bool:
     return bool(token) and token not in {"0", "gnd"} and re.fullmatch(r"[A-Za-z0-9_:/#$.+-]+", token) is not None
+
+
+def apply_model_corner(source_text: str, corner: str) -> str:
+    """Rewrite a SKY130 .lib corner selector when present."""
+    target_corner = corner.strip().lower()
+    if target_corner not in {"tt", "ss", "ff", "sf", "fs"}:
+        return source_text
+
+    updated_lines: list[str] = []
+    for line in source_text.splitlines():
+        stripped = line.strip()
+        lowered = stripped.lower()
+        if lowered.startswith(".lib ") and "sky130.lib.spice" in lowered:
+            parts = stripped.split()
+            if len(parts) >= 3:
+                parts[-1] = target_corner
+                indent = line[: len(line) - len(line.lstrip())]
+                updated_lines.append(indent + " ".join(parts))
+                continue
+        updated_lines.append(line)
+    return "\n".join(updated_lines)

@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QSplashScreen
 
 
-def _draw_squirrel_silhouette(painter: QPainter, x: int, y: int, scale: float = 1.0) -> None:
-    """Draw a clean white squirrel-like silhouette."""
+SPLASH_PRIMARY = QColor("#0a5c2a")
+SPLASH_SECONDARY = QColor("#0f7a38")
+SPLASH_DARK = QColor("#062816")
+SPLASH_ACCENT = QColor("#9cf5b4")
+SPLASH_TEXT = QColor("#f4fff7")
+SPLASH_MUTED = QColor("#d3ebd9")
+SPLASH_PROGRESS = QColor("#e9fff0")
+LOGO_PATH = Path("/home/romeruu/Descargas/ardilla_silueta_blanca_suave.svg")
+
+
+def _draw_fallback_logo(painter: QPainter, x: int, y: int, scale: float = 1.0) -> None:
+    """Fallback logo used only if the SVG cannot be loaded."""
     path = QPainterPath()
     path.moveTo(x + 30 * scale, y + 140 * scale)
     path.cubicTo(x + 10 * scale, y + 90 * scale, x + 30 * scale, y + 40 * scale, x + 80 * scale, y + 35 * scale)
@@ -39,7 +52,24 @@ def _draw_squirrel_silhouette(painter: QPainter, x: int, y: int, scale: float = 
     painter.fillPath(leg, QColor("#ffffff"))
 
 
-def build_splash_pixmap(width: int = 920, height: int = 520) -> QPixmap:
+def _draw_logo(painter: QPainter, rect: QRectF) -> None:
+    """Draw the app SVG logo, falling back to a simple vector mark."""
+    clip_path = QPainterPath()
+    clip_path.addRoundedRect(rect, 26, 26)
+    painter.save()
+    painter.setClipPath(clip_path)
+
+    renderer = QSvgRenderer(str(LOGO_PATH))
+    if renderer.isValid():
+        renderer.render(painter, rect)
+        painter.restore()
+        return
+
+    _draw_fallback_logo(painter, x=int(rect.x()), y=int(rect.y()), scale=rect.width() / 380.0)
+    painter.restore()
+
+
+def build_splash_pixmap(width: int = 1020, height: int = 520) -> QPixmap:
     """Create a polished startup splash image using Qt painting."""
     pixmap = QPixmap(width, height)
     pixmap.fill(Qt.transparent)
@@ -48,35 +78,35 @@ def build_splash_pixmap(width: int = 920, height: int = 520) -> QPixmap:
     painter.setRenderHint(QPainter.Antialiasing)
 
     bg = QLinearGradient(0, 0, width, height)
-    bg.setColorAt(0.0, QColor("#0b1220"))
-    bg.setColorAt(0.45, QColor("#121f37"))
-    bg.setColorAt(1.0, QColor("#0b0f19"))
+    bg.setColorAt(0.0, SPLASH_DARK)
+    bg.setColorAt(0.45, SPLASH_PRIMARY)
+    bg.setColorAt(1.0, QColor("#04180d"))
     painter.fillRect(0, 0, width, height, bg)
 
     accent = QLinearGradient(0, height * 0.65, width, height)
-    accent.setColorAt(0.0, QColor(0, 160, 255, 80))
-    accent.setColorAt(1.0, QColor(0, 220, 180, 45))
+    accent.setColorAt(0.0, QColor(120, 255, 170, 55))
+    accent.setColorAt(1.0, QColor(255, 255, 255, 22))
     painter.fillRect(0, int(height * 0.65), width, int(height * 0.35), accent)
 
-    painter.setPen(QPen(QColor("#28d7ff"), 2))
+    painter.setPen(QPen(SPLASH_ACCENT, 2))
     painter.drawRoundedRect(20, 20, width - 40, height - 40, 22, 22)
 
-    _draw_squirrel_silhouette(painter, x=500, y=130, scale=0.95)
+    _draw_logo(painter, QRectF(728, 114, 195, 235))
 
-    painter.setPen(QColor("#8be9fd"))
-    painter.setFont(QFont("DejaVu Sans", 16, QFont.Bold))
+    painter.setPen(SPLASH_ACCENT)
+    painter.setFont(QFont("DejaVu Sans", 18, QFont.Bold))
     painter.drawText(55, 95, "SKY130 FLOW GUI")
 
-    painter.setPen(QColor("#e2ecff"))
-    painter.setFont(QFont("DejaVu Sans", 42, QFont.Black))
-    painter.drawText(55, 170, "Analog / Custom IC")
-    painter.drawText(55, 230, "Workflow Manager")
+    painter.setPen(SPLASH_TEXT)
+    painter.setFont(QFont("DejaVu Sans", 45, QFont.Black))
+    painter.drawText(55, 170, "Analog & Custom IC")
+    painter.drawText(55, 235, "Workflow Manager")
 
-    painter.setPen(QColor("#97a7c3"))
-    painter.setFont(QFont("DejaVu Sans", 14))
-    painter.drawText(58, 285, "xschem · ngspice · magic · netgen · klayout")
+    painter.setPen(SPLASH_MUTED)
+    painter.setFont(QFont("DejaVu Sans", 15))
+    painter.drawText(58, 300, "xschem · ngspice · magic · netgen · klayout")
 
-    painter.setPen(QColor("#9fc0ff"))
+    painter.setPen(QColor("#d6ffe2"))
     painter.setFont(QFont("DejaVu Sans", 11))
     painter.drawText(width - 310, height - 70, "MVP · Linux Desktop")
     painter.drawText(width - 310, height - 45, "SKY130 oriented")
@@ -96,5 +126,5 @@ class StartupSplash(QSplashScreen):
         self.showMessage(
             message,
             alignment=Qt.AlignBottom | Qt.AlignRight,
-            color=QColor("#d9f3ff"),
+            color=SPLASH_PROGRESS,
         )

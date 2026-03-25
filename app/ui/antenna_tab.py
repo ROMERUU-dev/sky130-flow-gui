@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.command_runner import CommandRunner
+from app.core.i18n import pick
 from app.core.log_parser import LogParser
 from app.core.settings_manager import AppSettings
 from app.runners.antenna_runner import AntennaRunner
@@ -32,6 +33,7 @@ class AntennaTab(QWidget):
     def __init__(self, settings: AppSettings, outputs_getter) -> None:
         super().__init__()
         self.settings = settings
+        self.lang = settings.language
         self.outputs_getter = outputs_getter
         self.builder = AntennaRunner(settings)
         self.runner = CommandRunner()
@@ -52,23 +54,23 @@ class AntennaTab(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         form = QFormLayout()
-        form.addRow("GDS File", self._row_file(self.gds_edit, "Select GDS", "GDS (*.gds *.gdsii);;All Files (*)"))
-        form.addRow("Antenna Deck", self._row_file(self.deck_edit, "Select antenna deck", "Ruby/Tcl (*.rb *.tcl);;All Files (*)"))
-        form.addRow("Top Cell", self.top_cell_edit)
+        form.addRow(pick(self.lang, "Archivo GDS", "GDS File"), self._row_file(self.gds_edit, pick(self.lang, "Selecciona GDS", "Select GDS"), "GDS (*.gds *.gdsii);;All Files (*)"))
+        form.addRow(pick(self.lang, "Deck de antena", "Antenna Deck"), self._row_file(self.deck_edit, pick(self.lang, "Selecciona deck de antena", "Select antenna deck"), "Ruby/Tcl (*.rb *.tcl);;All Files (*)"))
+        form.addRow(pick(self.lang, "Celda top", "Top Cell"), self.top_cell_edit)
 
         out_row = QHBoxLayout()
         out_row.addWidget(self.output_dir)
-        open_btn = QPushButton("Open Output Folder")
+        open_btn = QPushButton(pick(self.lang, "Abrir carpeta de salida", "Open Output Folder"))
         open_btn.clicked.connect(self.open_output_folder)
         out_row.addWidget(open_btn)
-        form.addRow("Output Dir", out_row)
+        form.addRow(pick(self.lang, "Directorio de salida", "Output Dir"), out_row)
 
         layout.addLayout(form)
 
         btns = QHBoxLayout()
-        run = QPushButton("Run")
-        stop = QPushButton("Stop")
-        clear = QPushButton("Clear log")
+        run = QPushButton(pick(self.lang, "Correr", "Run"))
+        stop = QPushButton(pick(self.lang, "Detener", "Stop"))
+        clear = QPushButton(pick(self.lang, "Limpiar log", "Clear log"))
         btns.addWidget(run)
         btns.addWidget(stop)
         btns.addWidget(clear)
@@ -89,7 +91,7 @@ class AntennaTab(QWidget):
     def _row_file(self, edit: QLineEdit, title: str, filt: str):
         row = QHBoxLayout()
         row.addWidget(edit)
-        b = QPushButton("Browse")
+        b = QPushButton(pick(self.lang, "Buscar", "Browse"))
         b.clicked.connect(lambda: self._pick(edit, title, filt))
         row.addWidget(b)
         return row
@@ -104,16 +106,20 @@ class AntennaTab(QWidget):
         self.output_dir.setText(str(outputs.antenna))
 
         cmd, report = self.builder.run_spec(self.gds_edit.text(), self.deck_edit.text(), outputs, self.top_cell_edit.text().strip())
-        append_log(self.log, f"Output folder: {outputs.antenna}\nReport: {report}\n")
+        append_log(
+            self.log,
+            f"{pick(self.lang, 'Carpeta de salida', 'Output folder')}: {outputs.antenna}\n"
+            f"{pick(self.lang, 'Reporte', 'Report')}: {report}\n",
+        )
 
-        self.send_status.emit("Antenna check running")
+        self.send_status.emit(pick(self.lang, "Chequeo de antena corriendo", "Antenna check running"))
         self.runner.run(self.builder.build(cmd, cwd=str(outputs.base)))
 
     def _finished(self, code: int, _status: str) -> None:
         text = self.log.toPlainText()
         summary = LogParser.antenna_summary(text)
         if code != 0:
-            summary = "Antenna check failed"
+            summary = pick(self.lang, "Chequeo de antena falló", "Antenna check failed")
         self.summary.setText(summary)
         self.send_status.emit(summary)
 
