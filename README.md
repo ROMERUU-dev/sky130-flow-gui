@@ -184,6 +184,54 @@ That creates:
 - `~/.local/share/applications/sky130-flow-gui.desktop`
 - `~/.local/share/icons/hicolor/scalable/apps/sky130-flow-gui.svg`
 
+## Debian Package
+
+The repository now includes a base `.deb` packaging flow for Ubuntu/Debian systems.
+
+Build it from the repo root:
+
+```bash
+./scripts/build_deb.sh
+```
+
+Or specify version and architecture explicitly:
+
+```bash
+./scripts/build_deb.sh 0.1.0 all
+```
+
+The generated package is written to:
+
+```text
+dist/sky130-flow-gui_<version>_<arch>.deb
+```
+
+Install it with:
+
+```bash
+sudo dpkg -i dist/sky130-flow-gui_<version>_<arch>.deb
+```
+
+What this package does:
+
+- installs the app under `/opt/sky130-flow-gui`
+- installs a launcher under `/usr/bin/sky130-flow-gui`
+- installs a desktop entry and icon
+- creates a project `.venv` on install and installs `requirements.txt`
+
+What it does not do by itself:
+
+- install the full SKY130 PDK in every environment
+- replace the Setup Assistant
+- replace the Ubuntu bootstrap for the VLSI toolchain
+
+Recommended flow after installing the `.deb`:
+
+1. Launch the app
+2. Open `⬢ Entorno / Setup`
+3. Complete the setup wizard
+4. Validate the environment before running extraction or simulation
+
 ## Project Structure
 
 ```text
@@ -203,6 +251,7 @@ README.md
 - The Ubuntu bootstrap does not guarantee a fully automatic SKY130 PDK installation on every machine.
 - Some flows still depend on the user having a valid external installation of the VLSI toolchain.
 - This app improves workflow management; it is not a replacement for signoff flows or foundry-qualified verification.
+- The `.deb` packaging flow is designed for Ubuntu/Debian and assumes `dpkg-deb` is available on the build machine.
 
 ## Recommended Next Steps
 

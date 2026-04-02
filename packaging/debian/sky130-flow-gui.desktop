@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=SKY130 Flow GUI
+Comment=Workflow manager for SKY130 analog/custom IC tasks
+Exec=/usr/bin/sky130-flow-gui
+Icon=sky130-flow-gui
+Terminal=false
+Categories=Development;Electronics;Engineering;
+StartupNotify=true
