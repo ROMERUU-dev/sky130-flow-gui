@@ -47,6 +47,7 @@ class AntennaTab(QWidget):
         self.summary.setReadOnly(True)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
+        self._last_report_path = ""
 
         self._build_ui()
         self._wire()
@@ -106,6 +107,7 @@ class AntennaTab(QWidget):
         self.output_dir.setText(str(outputs.antenna))
 
         cmd, report = self.builder.run_spec(self.gds_edit.text(), self.deck_edit.text(), outputs, self.top_cell_edit.text().strip())
+        self._last_report_path = report
         append_log(
             self.log,
             f"{pick(self.lang, 'Carpeta de salida', 'Output folder')}: {outputs.antenna}\n"
@@ -117,6 +119,19 @@ class AntennaTab(QWidget):
 
     def _finished(self, code: int, _status: str) -> None:
         text = self.log.toPlainText()
+        if self._last_report_path:
+            report_path = Path(self._last_report_path)
+            if report_path.exists() and report_path.is_file():
+                try:
+                    report_text = report_path.read_text(encoding="utf-8", errors="replace")
+                    if report_text.strip():
+                        append_log(
+                            self.log,
+                            f"\n{pick(self.lang, 'Contenido del reporte', 'Report contents')}:\n{report_text}\n",
+                        )
+                        text = f"{text}\n{report_text}"
+                except OSError as exc:
+                    append_log(self.log, f"\nFailed to read antenna report: {exc}\n")
         summary = LogParser.antenna_summary(text)
         if code != 0:
             summary = pick(self.lang, "Chequeo de antena falló", "Antenna check failed")

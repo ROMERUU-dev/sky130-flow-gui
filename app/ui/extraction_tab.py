@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from app.core.command_runner import CommandRunner
 from app.core.i18n import pick
+from app.core.layout_tools import infer_top_cell, resolve_layout_dir
 from app.core.settings_manager import AppSettings
 from app.runners.magic_runner import MagicRunner
 from app.ui.widgets import append_log
@@ -100,7 +101,10 @@ class ExtractionTab(QWidget):
         outputs = self.outputs_getter()
         self.output_dir.setText(str(outputs.extraction))
 
-        top = self.top_cell.text().strip() or "top"
+        layout_dir = resolve_layout_dir(outputs.base)
+        top = self.top_cell.text().strip() or infer_top_cell(layout_dir) or "top"
+        if not self.top_cell.text().strip():
+            self.top_cell.setText(top)
         cmd, script, self._out_netlist = self.builder.run_spec(
             outputs=outputs,
             top_cell=top,
@@ -110,19 +114,31 @@ class ExtractionTab(QWidget):
         append_log(
             self.log,
             f"{pick(self.lang, 'Carpeta de salida', 'Output folder')}: {outputs.extraction}\n"
+            f"{pick(self.lang, 'Directorio de layout', 'Layout directory')}: {layout_dir}\n"
             f"{pick(self.lang, 'Script', 'Script')}: {script}\n"
             f"{pick(self.lang, 'Netlist', 'Netlist')}: {self._out_netlist}\n",
         )
 
         self.send_status.emit(pick(self.lang, "Extracción corriendo", "Extraction running"))
-        self.runner.run(self.builder.build(cmd, cwd=str(outputs.base)))
+        self.runner.run(self.builder.build(cmd, cwd=str(layout_dir)))
 
     def _finished(self, code: int, _status: str) -> None:
-        if code == 0:
-            self.send_status.emit(pick(self.lang, "Extracción completa", "Extraction complete"))
-            append_log(self.log, f"\n{pick(self.lang, 'Netlist extraído', 'Extracted netlist')}: {self._out_netlist}\n")
+        extracted_path = Path(self._out_netlist) if self._out_netlist else None
+        if code == 0 and extracted_path and extracted_path.exists() and extracted_path.is_file():
+            self.send_status.emit(pick(self.lang, "Extracción finalizada", "Extraction finished"))
+            append_log(
+                self.log,
+                f"\n{pick(self.lang, 'Extracción finalizada', 'Extraction finished')}\n"
+                f"{pick(self.lang, 'Netlist extraído', 'Extracted netlist')}: {self._out_netlist}\n",
+            )
         else:
             self.send_status.emit(pick(self.lang, "Extracción falló", "Extraction failed"))
+            if code == 0 and extracted_path:
+                append_log(
+                    self.log,
+                    f"\n{pick(self.lang, 'Magic terminó pero no generó el netlist SPICE esperado.', 'Magic finished but did not generate the expected SPICE netlist.')}\n"
+                    f"{pick(self.lang, 'Esperado en', 'Expected at')}: {self._out_netlist}\n",
+                )
 
     def _send_result(self) -> None:
         if self._out_netlist:

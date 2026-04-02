@@ -37,7 +37,7 @@ class WaveformViewer(QWidget):
     def __init__(self, language: str = "es") -> None:
         super().__init__()
         self.lang = language
-        self.plot = pg.PlotWidget(title=pick(self.lang, "Visor de formas de onda", "Waveform Viewer"))
+        self.plot = pg.PlotWidget(title="")
         self.plot.showGrid(x=True, y=True)
         self.signal_select = QComboBox()
         self.signal_select.currentTextChanged.connect(self._render_selected)
@@ -54,11 +54,17 @@ class WaveformViewer(QWidget):
 
         layout = QVBoxLayout(self)
         controls = QHBoxLayout()
-        controls.addWidget(QLabel(pick(self.lang, "Señal:", "Signal:")))
+        signal_label = QLabel(pick(self.lang, "Señal", "Signal"))
+        signal_label.setObjectName("viewerLabel")
+        controls.addWidget(signal_label)
         controls.addWidget(self.signal_select, 1)
-        controls.addWidget(QLabel(pick(self.lang, "Escala X:", "X scale:")))
+        x_label = QLabel(pick(self.lang, "Escala X", "X scale"))
+        x_label.setObjectName("viewerLabel")
+        controls.addWidget(x_label)
         controls.addWidget(self.x_scale)
-        controls.addWidget(QLabel(pick(self.lang, "Escala Y:", "Y scale:")))
+        y_label = QLabel(pick(self.lang, "Escala Y", "Y scale"))
+        y_label.setObjectName("viewerLabel")
+        controls.addWidget(y_label)
         controls.addWidget(self.y_scale)
         controls.addWidget(self.reset_view_btn)
         controls.addWidget(self.reset_scale_btn)
@@ -84,6 +90,7 @@ class WaveformViewer(QWidget):
         self.plot.setMinimumHeight(460)
         self.plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._configure_plot_appearance()
+        self._apply_viewer_style()
 
         for control in (self.x_scale, self.y_scale):
             control.setDecimals(2)
@@ -139,14 +146,18 @@ class WaveformViewer(QWidget):
         self._current_signal_name = name
         selected_names = self._selected_signal_names(name)
         primary_x, primary_y = self._signals[name]
-        self.plot.setTitle(f"{pick(self.lang, 'Visor de formas de onda', 'Waveform Viewer')} · {', '.join(selected_names)}")
+        self.plot.setTitle(
+            f"{pick(self.lang, 'Forma de onda', 'Waveform')}  {', '.join(selected_names)}",
+            color="#0f172a",
+            size="12pt",
+        )
         self._apply_axis_labels(name)
-        palette = ["#00d4ff", "#ffb000", "#7ee787", "#ff7b72", "#a78bfa", "#f472b6"]
+        palette = ["#2563eb", "#ef4444", "#0f9d8a", "#d97706", "#7c3aed", "#db2777"]
         range_x: list[float] = []
         range_y: list[float] = []
         for index, signal_name in enumerate(selected_names):
             x, y = self._signals[signal_name]
-            pen = pg.mkPen(palette[index % len(palette)], width=2)
+            pen = pg.mkPen(palette[index % len(palette)], width=2.2)
             self.plot.plot(x, y, pen=pen, name=signal_name)
             range_x.extend(x)
             range_y.extend(y)
@@ -214,14 +225,56 @@ class WaveformViewer(QWidget):
         return self._signals.get(name)
 
     def _configure_plot_appearance(self) -> None:
-        self.plot.setBackground("#0f1722")
-        self.plot.getPlotItem().showAxis("left")
-        self.plot.getPlotItem().showAxis("bottom")
-        self.plot.showGrid(x=True, y=True, alpha=0.28)
+        plot_item = self.plot.getPlotItem()
+        self.plot.setBackground("#ffffff")
+        plot_item.showAxis("left")
+        plot_item.showAxis("bottom")
+        plot_item.getViewBox().setBackgroundColor("#ffffff")
+        self.plot.showGrid(x=True, y=True, alpha=0.24)
         for axis_name in ("left", "bottom"):
-            axis = self.plot.getPlotItem().getAxis(axis_name)
-            axis.setPen(pg.mkPen("#c7d2e2", width=1.2))
-            axis.setTextPen(pg.mkPen("#e6edf7"))
+            axis = plot_item.getAxis(axis_name)
+            axis.setPen(pg.mkPen("#94a3b8", width=1.15))
+            axis.setTextPen(pg.mkPen("#334155"))
+            axis.setTickPen(pg.mkPen("#cbd5e1", width=1.0))
+        plot_item.getAxis("left").setStyle(tickTextOffset=10)
+        plot_item.getAxis("bottom").setStyle(tickTextOffset=10)
+
+    def _apply_viewer_style(self) -> None:
+        self.setStyleSheet(
+            """
+            QLabel {
+                color: #334155;
+            }
+            QLabel#viewerLabel {
+                color: #2563eb;
+                font-weight: 800;
+            }
+            QComboBox, QDoubleSpinBox {
+                background: #ffffff;
+                border: 1px solid #dfe7f2;
+                border-radius: 12px;
+                padding: 6px 8px;
+                min-height: 30px;
+            }
+            QPushButton {
+                background: #ffffff;
+                border: 1px solid transparent;
+                border-radius: 12px;
+                padding: 8px 12px;
+                color: #111827;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background: #f5f8ff;
+                border: 1px solid #d6e4ff;
+            }
+            """
+        )
+        self.empty_label.setStyleSheet("color: #64748b; font-size: 13px;")
+        self.signal_stats.setStyleSheet(
+            "background: #f8fbff; color: #334155; border: 1px solid #dfe7f2; "
+            "border-radius: 12px; padding: 10px 12px; font-weight: 600;"
+        )
 
     def _update_signal_stats(
         self,
@@ -271,7 +324,11 @@ class WaveformViewer(QWidget):
         original_title = plot_item.titleLabel.text
         try:
             self.plot.setBackground("w")
-            plot_item.setTitle(f"Waveform Viewer · {self._current_signal_name}", color="#111827", size="12pt")
+            plot_item.setTitle(
+                pick(self.lang, f"Forma de onda · {self._current_signal_name}", f"Waveform Viewer · {self._current_signal_name}"),
+                color="#111827",
+                size="12pt",
+            )
             for axis in axes.values():
                 axis.setPen(pg.mkPen("#111827", width=1.2))
                 axis.setTextPen(pg.mkPen("#111827"))
@@ -290,10 +347,7 @@ class WaveformViewer(QWidget):
         finally:
             self.plot.setBackground(original_background)
             plot_item.setTitle(original_title)
-            for axis_name, axis in axes.items():
-                if axis_name in ("left", "bottom"):
-                    axis.setPen(pg.mkPen("#c7d2e2", width=1.2))
-                    axis.setTextPen(pg.mkPen("#e6edf7"))
+            self._configure_plot_appearance()
 
         QMessageBox.information(
             self,
@@ -304,6 +358,8 @@ class WaveformViewer(QWidget):
     def _ensure_legend(self) -> None:
         if self._legend is None:
             self._legend = self.plot.addLegend(offset=(10, 10))
+            self._legend.setBrush(pg.mkBrush("#ffffff"))
+            self._legend.setPen(pg.mkPen("#dfe7f2"))
 
     def _reset_legend(self) -> None:
         if self._legend is None:

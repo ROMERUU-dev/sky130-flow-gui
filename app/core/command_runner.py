@@ -51,9 +51,16 @@ class CommandRunner(QObject):
         self._proc.readyReadStandardOutput.connect(self._read_stdout)
         self._proc.readyReadStandardError.connect(self._read_stderr)
         self._proc.finished.connect(self._on_finished)
+        self._proc.errorOccurred.connect(self._on_error)
 
         self.started.emit(" ".join(spec.command))
         self._proc.start()
+        if not self._proc.waitForStarted(100):
+            error = self._proc.errorString() or "Failed to start process."
+            self.line_output.emit(f"{error}\n")
+            self.finished.emit(-1, "failed_to_start")
+            self._proc.deleteLater()
+            self._proc = None
 
     def stop(self) -> None:
         """Try graceful stop, then hard kill if needed."""
@@ -76,3 +83,12 @@ class CommandRunner(QObject):
 
     def _on_finished(self, code: int, _status: QProcess.ExitStatus) -> None:
         self.finished.emit(code, "success" if code == 0 else "failed")
+        self._proc = None
+
+    def _on_error(self, error: QProcess.ProcessError) -> None:
+        if error == QProcess.FailedToStart and self._proc:
+            return
+        if self._proc:
+            message = self._proc.errorString()
+            if message:
+                self.line_output.emit(f"{message}\n")

@@ -11,18 +11,24 @@ from app.runners.base_runner import BaseRunner
 class MagicRunner(BaseRunner):
     """Build magic batch extraction command and script."""
 
+    @staticmethod
+    def _tcl_brace(value: str) -> str:
+        return "{" + value.replace("}", "\\}") + "}"
+
     def create_extraction_script(self, outputs: OutputPaths, top_cell: str, output_netlist: str) -> str:
         script_path = outputs.extraction / f"extract_{top_cell}.tcl"
         self.ensure_parent(str(script_path))
+        quoted_top = self._tcl_brace(top_cell)
+        quoted_output = self._tcl_brace(output_netlist)
         content = f"""
 crashbackups stop
-if {{[catch {{load {top_cell}}} msg]}} {{
+if {{[catch {{load {quoted_top}}} msg]}} {{
     puts stderr $msg
     exit 1
 }}
 extract all
 ext2spice lvs
-ext2spice -o {output_netlist}
+ext2spice -o {quoted_output}
 quit -noprompt
 """.strip()
         script_path.write_text(content)
@@ -42,5 +48,5 @@ quit -noprompt
         cmd = [self.settings.tool_paths.magic, "-dnull", "-noconsole"]
         if rcfile:
             cmd.extend(["-rcfile", rcfile])
-        cmd.extend(["-T", script])
+        cmd.append(script)
         return cmd, script, out_netlist

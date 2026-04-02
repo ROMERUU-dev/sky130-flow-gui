@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLineEdit,
+    QProgressBar,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
@@ -39,7 +40,9 @@ class LvsTab(QWidget):
         self.runner = CommandRunner()
 
         self.layout_edit = QLineEdit()
+        self.layout_top_edit = QLineEdit()
         self.schematic_edit = QLineEdit()
+        self.schematic_top_edit = QLineEdit()
         self.setup_edit = QLineEdit(settings.pdk_paths.netgen_setup)
         self.output_dir = QLineEdit()
         self.output_dir.setReadOnly(True)
@@ -47,6 +50,17 @@ class LvsTab(QWidget):
         self.summary.setReadOnly(True)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
+        self.run_btn = QPushButton(pick(self.lang, "Correr", "Run"))
+        self.stop_btn = QPushButton(pick(self.lang, "Detener", "Stop"))
+        self.stop_btn.setEnabled(False)
+        self.clear_btn = QPushButton(pick(self.lang, "Limpiar log", "Clear log"))
+        self.save_btn = QPushButton(pick(self.lang, "Exportar reporte", "Export Report"))
+        self.loading_bar = QProgressBar()
+        self.loading_bar.setRange(0, 0)
+        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setFixedWidth(150)
+        self.loading_bar.setVisible(False)
+        self.loading_bar.setToolTip(pick(self.lang, "LVS en progreso", "LVS in progress"))
 
         self._build_ui()
         self._wire()
@@ -66,10 +80,14 @@ class LvsTab(QWidget):
             pick(self.lang, "Netlist de layout / extracción", "Layout/Extracted Netlist"),
             self._file_row(self.layout_edit, pick(self.lang, "Selecciona netlist de layout", "Select layout netlist"), "Netlist (*.spice *.sp *.cir)"),
         )
+        self.layout_top_edit.setPlaceholderText(pick(self.lang, "Opcional, ej. tt_um_tetrahedral_oscillator", "Optional, e.g. tt_um_tetrahedral_oscillator"))
+        form.addRow(pick(self.lang, "Top cell layout", "Layout Top Cell"), self.layout_top_edit)
         form.addRow(
             pick(self.lang, "Netlist esquemático", "Schematic Netlist"),
             self._file_row(self.schematic_edit, pick(self.lang, "Selecciona netlist esquemático", "Select schematic netlist"), "Netlist (*.spice *.sp *.cir)"),
         )
+        self.schematic_top_edit.setPlaceholderText(pick(self.lang, "Opcional, ej. tt_um_tetrahedral_oscillator", "Optional, e.g. tt_um_tetrahedral_oscillator"))
+        form.addRow(pick(self.lang, "Top cell esquemático", "Schematic Top Cell"), self.schematic_top_edit)
         form.addRow(
             pick(self.lang, "Setup Tcl de netgen", "Netgen Setup Tcl"),
             self._file_row(self.setup_edit, pick(self.lang, "Selecciona setup de netgen", "Select netgen setup"), "Tcl (*.tcl);;All Files (*)"),
@@ -85,20 +103,17 @@ class LvsTab(QWidget):
         layout.addLayout(form)
 
         btns = QHBoxLayout()
-        run = QPushButton(pick(self.lang, "Correr", "Run"))
-        stop = QPushButton(pick(self.lang, "Detener", "Stop"))
-        clear = QPushButton(pick(self.lang, "Limpiar log", "Clear log"))
-        save = QPushButton(pick(self.lang, "Exportar reporte", "Export Report"))
-        btns.addWidget(run)
-        btns.addWidget(stop)
-        btns.addWidget(clear)
-        btns.addWidget(save)
+        btns.addWidget(self.run_btn)
+        btns.addWidget(self.stop_btn)
+        btns.addWidget(self.clear_btn)
+        btns.addWidget(self.save_btn)
+        btns.addWidget(self.loading_bar)
         layout.addLayout(btns)
 
-        run.clicked.connect(self.run)
-        stop.clicked.connect(self.runner.stop)
-        clear.clicked.connect(self.log.clear)
-        save.clicked.connect(self.export_report)
+        self.run_btn.clicked.connect(self.run)
+        self.stop_btn.clicked.connect(self.runner.stop)
+        self.clear_btn.clicked.connect(self.log.clear)
+        self.save_btn.clicked.connect(self.export_report)
 
         layout.addWidget(self.summary)
         layout.addWidget(self.log)
@@ -116,22 +131,39 @@ class LvsTab(QWidget):
     def run(self) -> None:
         outputs = self.outputs_getter()
         self.output_dir.setText(str(outputs.lvs))
-        cmd, report = self.builder.run_spec(self.layout_edit.text(), self.schematic_edit.text(), self.setup_edit.text(), outputs)
+        cmd, report = self.builder.run_spec(
+            self.layout_edit.text(),
+            self.layout_top_edit.text(),
+            self.schematic_edit.text(),
+            self.schematic_top_edit.text(),
+            self.setup_edit.text(),
+            outputs,
+        )
         append_log(
             self.log,
             f"{pick(self.lang, 'Carpeta de salida', 'Output folder')}: {outputs.lvs}\n"
+            f"{pick(self.lang, 'Top layout', 'Layout top')}: {self.layout_top_edit.text().strip() or '-'}\n"
+            f"{pick(self.lang, 'Top esquemático', 'Schematic top')}: {self.schematic_top_edit.text().strip() or '-'}\n"
             f"{pick(self.lang, 'Reporte', 'Report')}: {report}\n",
         )
+        self.summary.clear()
         self.send_status.emit(pick(self.lang, "LVS corriendo", "LVS running"))
+        self._set_lvs_running(True)
         self.runner.run(self.builder.build(cmd, cwd=str(outputs.base)))
 
     def _finished(self, code: int, _status: str) -> None:
+        self._set_lvs_running(False)
         text = self.log.toPlainText()
         summary = LogParser.lvs_summary(text)
         if code != 0:
             summary = pick(self.lang, "LVS falló", "LVS failed")
         self.summary.setText(summary)
         self.send_status.emit(summary)
+
+    def _set_lvs_running(self, running: bool) -> None:
+        self.run_btn.setDisabled(running)
+        self.stop_btn.setEnabled(running)
+        self.loading_bar.setVisible(running)
 
     def export_report(self) -> None:
         out, _ = QFileDialog.getSaveFileName(

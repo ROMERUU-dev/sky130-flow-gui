@@ -20,8 +20,9 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
+    QFrame,
     QFormLayout,
-    QGroupBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -48,6 +49,7 @@ from app.core.spice_tools import (
     apply_model_corner,
     analyze_signal,
     build_generated_netlist,
+    ensure_sky130_model_lib,
     extract_candidate_points,
     format_value,
 )
@@ -62,7 +64,7 @@ from app.services.em_netlist_instrumentation import (
     write_em_probe_map,
 )
 from app.ui.waveform_viewer import WaveformViewer
-from app.ui.widgets import append_log
+from app.ui.widgets import CollapsibleSection, append_log
 
 
 class SimulationTab(QWidget):
@@ -92,7 +94,7 @@ class SimulationTab(QWidget):
         self.extra_directives = QTextEdit()
         self.extra_directives.setPlaceholderText(pick(self.lang, "Directivas extra opcionales (.meas, .ic, .param, etc.)", "Optional extra directives (.meas, .ic, .param, etc.)"))
         self.wave = WaveformViewer(self.lang)
-        self.spectrum_plot = pg.PlotWidget(title=pick(self.lang, "Espectro de frecuencia", "Frequency Spectrum"))
+        self.spectrum_plot = pg.PlotWidget(title="")
         self.spectrum_plot.setLabel("bottom", pick(self.lang, "Frecuencia", "Frequency"), units="Hz")
         self.spectrum_plot.setLabel("left", "dB", units="dB")
         self.spectrum_plot.showGrid(x=True, y=True)
@@ -136,12 +138,20 @@ class SimulationTab(QWidget):
         self.loading_bar.setToolTip(pick(self.lang, "Simulación en progreso", "Simulation in progress"))
         self.add_probe_btn = QPushButton(pick(self.lang, "Agregar probe", "Add Probe Point"))
         self.refresh_points_btn = QPushButton(pick(self.lang, "Refrescar probes", "Refresh Points"))
-        self.edit_netlist_btn = QToolButton()
-        self.edit_netlist_btn.setText(pick(self.lang, "Modificar netlist (beta)", "Edit netlist (beta)"))
-        self.edit_netlist_btn.setCheckable(True)
-        self.edit_netlist_btn.setChecked(False)
         self.paste_netlist_btn = QToolButton()
         self.paste_netlist_btn.setText(pick(self.lang, "Pegar netlist", "Paste netlist"))
+        self.page_title = QLabel(pick(self.lang, "Simulación", "Simulation"))
+        self.page_subtitle = QLabel(
+            pick(
+                self.lang,
+                "Corre, abre el waveform y ajusta sólo lo que necesites.",
+                "Run, inspect the waveform, and adjust only what you need.",
+            )
+        )
+        self.summary_status_value = QLabel(pick(self.lang, "Listo", "Idle"))
+        self.summary_output_value = QLabel("—")
+        self.summary_generated_value = QLabel("—")
+        self.summary_waveform_value = QLabel(pick(self.lang, "Sin cargar", "Not loaded"))
 
         self.sim_type = QComboBox()
         self.sim_type.addItems(
@@ -182,6 +192,15 @@ class SimulationTab(QWidget):
         self.corner.addItems(["tt", "ss", "ff", "sf", "fs"])
         self.temp_c = QLineEdit()
         self.temp_c.setPlaceholderText(pick(self.lang, "Opcional, ej. 27", "Optional, e.g. 27"))
+        self.postlayout_use_ic = QCheckBox(pick(self.lang, "Post-layout: usar condiciones iniciales", "Post-layout: use initial conditions"))
+        self.postlayout_use_ic.setChecked(True)
+        self.postlayout_load_mode = QComboBox()
+        self.postlayout_load_mode.addItem(pick(self.lang, "Sin carga", "No load"), "none")
+        self.postlayout_load_mode.addItem(pick(self.lang, "Capacitiva", "Capacitive"), "cap")
+        self.postlayout_load_mode.addItem(pick(self.lang, "RC serie", "Series RC"), "rc")
+        self.postlayout_load_mode.setCurrentIndex(1)
+        self.postlayout_load_cap = QLineEdit("10f")
+        self.postlayout_load_res = QLineEdit("1k")
         self.spectrum_mode = QComboBox()
         self.spectrum_mode.addItems(
             [
@@ -240,6 +259,13 @@ class SimulationTab(QWidget):
         self._spectrum_base_y_range: tuple[float, float] | None = None
         self._current_spectrum_signal_name = ""
         self._current_spectrum_has_data = False
+        self.setup_section = None
+        self.probes_section = None
+        self.internal_section = None
+        self.netlist_section = None
+        self.visual_section = None
+        self.measurements_section = None
+        self.spectrum_section = None
 
         for control in (self.spectrum_x_scale, self.spectrum_y_scale):
             control.setDecimals(2)
@@ -248,9 +274,11 @@ class SimulationTab(QWidget):
             control.setValue(1.0)
 
         self._build_ui()
+        self._apply_visual_style()
         self._wire()
         self.refresh_history()
         self._refresh_probe_points()
+        self._update_run_summary()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -261,6 +289,11 @@ class SimulationTab(QWidget):
 
         page = QWidget()
         page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(28, 24, 28, 36)
+        page_layout.setSpacing(18)
+
+        page_layout.addWidget(self._build_header())
+        page_layout.addWidget(self._build_run_summary())
 
         row = QHBoxLayout()
         row.addWidget(QLabel(pick(self.lang, "Netlist:", "Netlist:")))
@@ -297,38 +330,189 @@ class SimulationTab(QWidget):
         history_row.addWidget(self.refresh_history_btn)
         page_layout.addLayout(history_row)
 
-        page_layout.addWidget(self._build_simulation_setup())
-        page_layout.addWidget(self._build_probe_editor())
-        page_layout.addWidget(self._build_internal_net_inspector())
+        self.setup_section = CollapsibleSection(
+            pick(self.lang, "Configuración", "Run Setup"),
+            self._build_simulation_setup(),
+            expanded=True,
+        )
+        self.probes_section = CollapsibleSection(
+            pick(self.lang, "Puntos de prueba", "Probe Points"),
+            self._build_probe_editor(),
+            expanded=False,
+        )
+        self.internal_section = CollapsibleSection(
+            pick(self.lang, "Inspector de nets internas", "Internal Net Inspector"),
+            self._build_internal_net_inspector(),
+            expanded=False,
+        )
+        page_layout.addWidget(self.setup_section)
+        page_layout.addWidget(self.probes_section)
+        page_layout.addWidget(self.internal_section)
         netlist_tools = QHBoxLayout()
-        netlist_tools.addWidget(self.edit_netlist_btn)
-        netlist_tools.addWidget(self.paste_netlist_btn)
+        netlist_hint = QLabel(
+            pick(
+                self.lang,
+                "Opcional: pega un deck propio o abre el editor cuando quieras afinar el netlist generado.",
+                "Optional: paste your own deck or open the editor when you want to refine the generated netlist.",
+            )
+        )
+        netlist_hint.setObjectName("inlineHint")
+        netlist_tools.addWidget(netlist_hint)
         netlist_tools.addStretch(1)
+        netlist_tools.addWidget(self.paste_netlist_btn)
         page_layout.addLayout(netlist_tools)
-        page_layout.addWidget(self._build_netlist_editor())
-        page_layout.addWidget(self._build_visualization_options())
+        self.netlist_section = CollapsibleSection(
+            pick(self.lang, "Editor de netlist", "Netlist Editor"),
+            self._build_netlist_editor(),
+            expanded=False,
+        )
+        self.visual_section = CollapsibleSection(
+            pick(self.lang, "Visualización", "Visualization Options"),
+            self._build_visualization_options(),
+            expanded=False,
+        )
+        page_layout.addWidget(self.netlist_section)
+        page_layout.addWidget(self.visual_section)
         page_layout.addWidget(self.wave)
-        page_layout.addWidget(self._build_measurement_panel())
-        page_layout.addWidget(self._build_spectrum_panel())
+        self.measurements_section = CollapsibleSection(
+            pick(self.lang, "Mediciones", "Measurements"),
+            self._build_measurement_panel(),
+            expanded=False,
+        )
+        self.spectrum_section = CollapsibleSection(
+            pick(self.lang, "Espectro de frecuencia", "Frequency Spectrum"),
+            self._build_spectrum_panel(),
+            expanded=False,
+        )
+        page_layout.addWidget(self.measurements_section)
+        page_layout.addWidget(self.spectrum_section)
         page_layout.addStretch(1)
 
         scroll.setWidget(page)
 
+    def _build_header(self) -> QWidget:
+        card = QFrame()
+        card.setObjectName("heroCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(4)
+        self.page_title.setObjectName("pageTitle")
+        self.page_subtitle.setObjectName("pageSubtitle")
+        layout.addWidget(self.page_title)
+        layout.addWidget(self.page_subtitle)
+        return card
+
+    def _build_run_summary(self) -> QWidget:
+        card = QFrame()
+        card.setObjectName("summaryCard")
+        grid = QGridLayout(card)
+        grid.setContentsMargins(14, 14, 14, 14)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(12)
+
+        items = [
+            (pick(self.lang, "Estado", "Status"), self.summary_status_value),
+            (pick(self.lang, "Salida", "Output"), self.summary_output_value),
+            (pick(self.lang, "Deck generado", "Deck"), self.summary_generated_value),
+            (pick(self.lang, "Forma de onda", "Waveform"), self.summary_waveform_value),
+        ]
+        for index, (label_text, value_label) in enumerate(items):
+            panel = QFrame()
+            panel.setObjectName("summaryItem")
+            panel_layout = QVBoxLayout(panel)
+            panel_layout.setContentsMargins(14, 12, 14, 12)
+            panel_layout.setSpacing(4)
+            label = QLabel(label_text)
+            label.setObjectName("summaryLabel")
+            value_label.setObjectName("summaryValue")
+            panel_layout.addWidget(label)
+            panel_layout.addWidget(value_label)
+            grid.addWidget(panel, 0, index)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(2, 1)
+        grid.setColumnStretch(3, 1)
+        return card
+
+    def _build_section_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("sectionCard")
+        return card
+
+    def _build_subsection_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("subCard")
+        return card
+
+    def _make_section_heading(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("sectionHeading")
+        return label
+
+    def _make_hint_label(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setObjectName("hintLabel")
+        return label
+
     def _build_simulation_setup(self) -> QWidget:
-        box = QGroupBox(pick(self.lang, "Configuración de simulación", "Simulation Setup"))
-        form = QFormLayout(box)
-        form.addRow(pick(self.lang, "Tipo:", "Type:"), self.sim_type)
-        form.addRow(pick(self.lang, "Modo de guardado:", "Save mode:"), self.save_mode)
-        form.addRow(pick(self.lang, "Corner:", "Corner:"), self.corner)
-        form.addRow(pick(self.lang, "Temperatura (C):", "Temperature (C):"), self.temp_c)
-        form.addRow("", self.generate_em_checkbox)
-        form.addRow("", self.debug_em_only_checkbox)
-        form.addRow("", self.keep_em_files_checkbox)
-        form.addRow(pick(self.lang, "Proyecto EM:", "EM Project Mode:"), self.em_project_mode)
+        card = self._build_section_card()
+        outer = QVBoxLayout(card)
+        outer.setContentsMargins(18, 18, 18, 18)
+        outer.setSpacing(16)
+
+        basics = QFormLayout()
+        basics.setHorizontalSpacing(16)
+        basics.setVerticalSpacing(10)
+        basics.addRow(pick(self.lang, "Tipo:", "Type:"), self.sim_type)
+        basics.addRow(pick(self.lang, "Modo de guardado:", "Save mode:"), self.save_mode)
+        outer.addWidget(self._make_section_heading(pick(self.lang, "General", "General")))
+        outer.addLayout(basics)
+
+        postlayout_box = self._build_subsection_card()
+        postlayout_layout = QVBoxLayout(postlayout_box)
+        postlayout_layout.setContentsMargins(16, 16, 16, 16)
+        postlayout_layout.setSpacing(10)
+        postlayout_layout.addWidget(self._make_section_heading(pick(self.lang, "Post-layout Wrapper", "Post-layout Wrapper")))
+        postlayout_layout.addWidget(
+            self._make_hint_label(
+                pick(
+                    self.lang,
+                    "Arranque y carga para netlists extraídos sin testbench manual.",
+                    "Startup and loading for extracted netlists without a manual testbench.",
+                )
+            )
+        )
+        postlayout_form = QFormLayout()
+        postlayout_form.setHorizontalSpacing(16)
+        postlayout_form.setVerticalSpacing(10)
+        postlayout_form.addRow("", self.postlayout_use_ic)
+        postlayout_form.addRow(pick(self.lang, "Modelo de carga:", "Load model:"), self.postlayout_load_mode)
+        postlayout_form.addRow(pick(self.lang, "Capacitancia:", "Capacitance:"), self.postlayout_load_cap)
+        postlayout_form.addRow(pick(self.lang, "Resistencia serie:", "Series resistance:"), self.postlayout_load_res)
+        postlayout_layout.addLayout(postlayout_form)
+        outer.addWidget(postlayout_box)
+
+        advanced_box = self._build_subsection_card()
+        advanced_layout = QVBoxLayout(advanced_box)
+        advanced_layout.setContentsMargins(16, 16, 16, 16)
+        advanced_layout.setSpacing(10)
+        advanced_layout.addWidget(self._make_section_heading(pick(self.lang, "Avanzado", "Advanced")))
+        advanced_form = QFormLayout()
+        advanced_form.setHorizontalSpacing(16)
+        advanced_form.setVerticalSpacing(10)
+        advanced_form.addRow(pick(self.lang, "Corner:", "Corner:"), self.corner)
+        advanced_form.addRow(pick(self.lang, "Temperatura (C):", "Temperature (C):"), self.temp_c)
+        advanced_form.addRow("", self.generate_em_checkbox)
+        advanced_form.addRow("", self.debug_em_only_checkbox)
+        advanced_form.addRow("", self.keep_em_files_checkbox)
+        advanced_form.addRow(pick(self.lang, "Modo de proyecto EM:", "EM Project Mode:"), self.em_project_mode)
         em_folder_row = QHBoxLayout()
         em_folder_row.addWidget(self.open_em_netlists_btn)
         em_folder_row.addWidget(self.open_em_inputs_btn)
-        form.addRow("", em_folder_row)
+        advanced_form.addRow("", em_folder_row)
+        advanced_layout.addLayout(advanced_form)
+        outer.addWidget(advanced_box)
 
         tran_page = QWidget()
         tran_form = QFormLayout(tran_page)
@@ -367,31 +551,44 @@ class SimulationTab(QWidget):
         self.sim_stack.addWidget(ac_page)
         self.sim_stack.addWidget(dc_page)
         self.sim_stack.addWidget(op_page)
-        form.addRow(self.sim_stack)
-        return box
+        outer.addWidget(self.sim_stack)
+        return card
 
     def _build_probe_editor(self) -> QWidget:
-        box = QGroupBox(pick(self.lang, "Puntos de prueba", "Probe Points"))
-        outer = QVBoxLayout(box)
+        card = self._build_section_card()
+        outer = QVBoxLayout(card)
+        outer.setContentsMargins(18, 18, 18, 18)
+        outer.setSpacing(14)
+        outer.addWidget(
+            self._make_hint_label(
+                pick(self.lang, "Elige nodos o escribe expresiones como v(out) o i(v1).", "Choose nodes or type expressions like v(out) or i(v1).")
+            )
+        )
         top = QHBoxLayout()
-        top.addWidget(QLabel(pick(self.lang, "Elige nodos o escribe expresiones como v(out) / i(v1):", "Choose nodes or type expressions like v(out) / i(v1):")))
         top.addWidget(self.add_probe_btn)
         top.addWidget(self.refresh_points_btn)
+        top.addStretch(1)
         outer.addLayout(top)
 
         container = QWidget()
         self.probe_layout = QVBoxLayout(container)
         self.probe_layout.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(container)
-        return box
+        return card
 
     def _build_internal_net_inspector(self) -> QWidget:
-        box = QGroupBox("Internal Net Inspector")
-        outer = QVBoxLayout(box)
+        card = self._build_section_card()
+        outer = QVBoxLayout(card)
+        outer.setContentsMargins(18, 18, 18, 18)
+        outer.setSpacing(14)
         top = QHBoxLayout()
-        top.addWidget(QLabel(pick(self.lang, "Selecciona net interna:", "Select internal net:")))
-        top.addWidget(self.internal_net_combo, 1)
+        top.addWidget(self._make_hint_label(pick(self.lang, "Selecciona una net interna para previsualizar y mover instrumentación.", "Select an internal net to preview and move instrumentation.")))
+        top.addStretch(1)
         outer.addLayout(top)
+        combo_row = QHBoxLayout()
+        combo_row.addWidget(QLabel(pick(self.lang, "Net interna:", "Internal net:")))
+        combo_row.addWidget(self.internal_net_combo, 1)
+        outer.addLayout(combo_row)
 
         self.internal_connections_table.setHorizontalHeaderLabels(
             [
@@ -408,22 +605,25 @@ class SimulationTab(QWidget):
         buttons.addWidget(self.apply_internal_btn)
         buttons.addStretch(1)
         outer.addLayout(buttons)
-        return box
+        return card
 
     def _build_netlist_editor(self) -> QWidget:
-        box = QGroupBox(pick(self.lang, "Editor de netlist", "Netlist Editor"))
-        box.setVisible(False)
-        outer = QVBoxLayout(box)
-        outer.addWidget(QLabel(pick(self.lang, "Editor temporal del netlist de simulación:", "Temporary Simulation Netlist Editor:")))
+        card = self._build_section_card()
+        card.setVisible(False)
+        outer = QVBoxLayout(card)
+        outer.setContentsMargins(18, 18, 18, 18)
+        outer.setSpacing(12)
+        outer.addWidget(self._make_hint_label(pick(self.lang, "Editor temporal del deck de simulación. El archivo original no se sobrescribe.", "Temporary editor for the simulation deck. The original file is not overwritten.")))
         outer.addWidget(self.file_view)
-        outer.addWidget(QLabel(pick(self.lang, "Directivas extra:", "Extra Directives:")))
+        outer.addWidget(self._make_section_heading(pick(self.lang, "Directivas extra", "Extra Directives")))
         outer.addWidget(self.extra_directives)
-        self.netlist_editor_box = box
-        return box
+        self.netlist_editor_box = card
+        return card
 
     def _build_measurement_panel(self) -> QWidget:
-        box = QGroupBox(pick(self.lang, "Mediciones", "Measurements"))
-        form = QFormLayout(box)
+        card = self._build_section_card()
+        form = QFormLayout(card)
+        form.setContentsMargins(18, 18, 18, 18)
         form.addRow(pick(self.lang, "Señal:", "Signal:"), self.metric_signal)
         form.addRow(pick(self.lang, "Referencia de fase:", "Phase reference:"), self.metric_reference)
         form.addRow("Min:", self.metric_labels["minimum"])
@@ -435,19 +635,146 @@ class SimulationTab(QWidget):
         form.addRow(pick(self.lang, "Frecuencia:", "Frequency:"), self.metric_labels["frequency_hz"])
         form.addRow(pick(self.lang, "Período:", "Period:"), self.metric_labels["period_s"])
         form.addRow(pick(self.lang, "Fase:", "Phase:"), self.metric_labels["phase_deg"])
-        return box
+        return card
+
+    def _apply_visual_style(self) -> None:
+        self.setStyleSheet(
+            """
+            QFrame#heroCard, QFrame#summaryCard {
+                background: #ffffff;
+                border: 1px solid #e8eef7;
+                border-radius: 18px;
+            }
+            QFrame#summaryItem, QFrame#sectionCard, QFrame#subCard {
+                background: #ffffff;
+                border: 1px solid #e8eef7;
+                border-radius: 16px;
+            }
+            QLabel#pageTitle {
+                font-size: 24px;
+                font-weight: 800;
+                color: #2563eb;
+            }
+            QLabel#pageSubtitle {
+                font-size: 13px;
+                color: #667085;
+            }
+            QLabel#summaryLabel {
+                font-size: 11px;
+                font-weight: 700;
+                color: #7a8699;
+            }
+            QLabel#summaryValue {
+                font-size: 14px;
+                font-weight: 700;
+                color: #111827;
+            }
+            QLabel#sectionHeading {
+                font-size: 13px;
+                font-weight: 800;
+                color: #2563eb;
+            }
+            QLabel#hintLabel, QLabel#inlineHint {
+                color: #667085;
+                font-size: 12px;
+            }
+            QLabel {
+                color: #273142;
+            }
+            QScrollArea {
+                border: 0;
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                background: transparent;
+                width: 12px;
+                margin: 4px 4px 4px 0;
+            }
+            QScrollBar::handle:vertical {
+                background: #d8e2f0;
+                min-height: 36px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #bfd0e8;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: transparent;
+                height: 0;
+            }
+            QScrollBar:horizontal {
+                background: transparent;
+                height: 12px;
+                margin: 0 4px 4px 4px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #d8e2f0;
+                min-width: 36px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #bfd0e8;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+                background: transparent;
+                width: 0;
+            }
+            QFrame#subCard {
+                background: #fbfdff;
+            }
+            QToolButton {
+                background: #ffffff;
+                border: 1px solid transparent;
+                border-radius: 14px;
+                padding: 10px 12px;
+                color: #1f2937;
+                font-weight: 800;
+                text-align: left;
+            }
+            QToolButton:hover {
+                background: #f8fbff;
+                border: 1px solid #d6e4ff;
+            }
+            QLineEdit, QComboBox, QTextEdit, QDoubleSpinBox, QTableWidget {
+                background: #ffffff;
+                border: 1px solid #dfe7f2;
+                border-radius: 12px;
+                padding: 7px 9px;
+                color: #111827;
+            }
+            QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QDoubleSpinBox:focus, QTableWidget:focus {
+                border: 1px solid #93c5fd;
+            }
+            QPushButton, QToolButton {
+                background: #ffffff;
+                border: 1px solid transparent;
+                border-radius: 12px;
+                padding: 8px 13px;
+                color: #111827;
+                font-weight: 600;
+            }
+            QPushButton:hover, QToolButton:hover {
+                background: #f5f8ff;
+                border: 1px solid #d6e4ff;
+            }
+            """
+        )
 
     def _build_visualization_options(self) -> QWidget:
-        box = QGroupBox(pick(self.lang, "Opciones de visualización", "Visualization Options"))
-        form = QFormLayout(box)
+        card = self._build_section_card()
+        form = QFormLayout(card)
+        form.setContentsMargins(18, 18, 18, 18)
         form.addRow(pick(self.lang, "Espectro:", "Spectrum:"), self.spectrum_mode)
         form.addRow(pick(self.lang, "Eje X del espectro:", "Spectrum X axis:"), self.spectrum_x_axis)
-        form.addRow(QLabel(pick(self.lang, "Tip: la gráfica inferior es un espectro tipo FFT y aparece para señales en el dominio del tiempo.", "Tip: the lower graph is an FFT-like spectrum and is available for time-domain signals.")))
-        return box
+        form.addRow(self._make_hint_label(pick(self.lang, "La gráfica inferior es un espectro tipo FFT y aparece para señales en el dominio del tiempo.", "The lower chart is an FFT-like spectrum and appears for time-domain signals.")))
+        return card
 
     def _build_spectrum_panel(self) -> QWidget:
-        box = QGroupBox(pick(self.lang, "Espectro de frecuencia", "Frequency Spectrum"))
-        outer = QVBoxLayout(box)
+        card = self._build_section_card()
+        outer = QVBoxLayout(card)
+        outer.setContentsMargins(18, 18, 18, 18)
         controls = QHBoxLayout()
         controls.addWidget(QLabel(pick(self.lang, "Escala X:", "X scale:")))
         controls.addWidget(self.spectrum_x_scale)
@@ -461,7 +788,7 @@ class SimulationTab(QWidget):
         outer.addLayout(controls)
         outer.addWidget(self.spectrum_plot)
         outer.addWidget(self.spectrum_stats)
-        return box
+        return card
 
     def _wire(self) -> None:
         self.run_btn.clicked.connect(self.run)
@@ -487,7 +814,6 @@ class SimulationTab(QWidget):
         self.spectrum_export_png_btn.clicked.connect(lambda: self._export_spectrum_plot("png"))
         self.spectrum_export_svg_btn.clicked.connect(lambda: self._export_spectrum_plot("svg"))
         self.wave.signal_changed.connect(self._sync_metric_selection)
-        self.edit_netlist_btn.toggled.connect(self._toggle_netlist_editor)
         self.paste_netlist_btn.clicked.connect(self._paste_netlist)
         self.generate_em_checkbox.toggled.connect(self._sync_em_options_state)
         self.debug_em_only_checkbox.toggled.connect(self._sync_em_options_state)
@@ -502,7 +828,9 @@ class SimulationTab(QWidget):
         self.runner.line_output.connect(self._append_log)
         self.runner.finished.connect(self._finished)
         self._sync_em_options_state()
+        self._sync_postlayout_load_controls()
         self._refresh_internal_net_inspector()
+        self.postlayout_load_mode.currentIndexChanged.connect(self._sync_postlayout_load_controls)
 
     def _pick_file(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(self, "Select netlist", "", "SPICE Files (*.spice *.sp *.cir)")
@@ -511,6 +839,7 @@ class SimulationTab(QWidget):
 
     def load_netlist_path(self, file_path: str) -> None:
         self.netlist_edit.setText(file_path)
+        self._update_run_summary()
         try:
             self.file_view.setPlainText(Path(file_path).read_text())
             self._refresh_probe_points()
@@ -520,7 +849,7 @@ class SimulationTab(QWidget):
     def run(self) -> None:
         source_netlist = self._ensure_editor_content()
         if not source_netlist:
-            self._append_log("Select a netlist first.\n")
+            self._append_log(pick(self.lang, "Selecciona un netlist primero.\n", "Select a netlist first.\n"))
             return
 
         outputs = self._create_simulation_outputs()
@@ -530,6 +859,7 @@ class SimulationTab(QWidget):
         generated_netlist = self._write_generated_netlist(outputs)
         self._last_generated_netlist = generated_netlist
         self.generated_path_edit.setText(str(generated_netlist))
+        self._update_run_summary(status=pick(self.lang, "Preparando corrida", "Preparing run"))
         self._pending_em_run = None
         self._running_em_followup = False
         if self._em_workflow_requested():
@@ -552,9 +882,10 @@ class SimulationTab(QWidget):
         self._clear_measurements()
         self._clear_spectrum_plot()
         self.refresh_history()
-        self.send_status.emit("Simulation running")
+        self.send_status.emit(pick(self.lang, "Simulación corriendo", "Simulation running"))
         self._set_simulation_running(True)
         self.runner.run(self.builder.build(cmd, cwd=run_cwd))
+        self._update_run_summary(status=pick(self.lang, "Corriendo", "Running"))
 
     def rerun(self) -> None:
         self.run()
@@ -588,11 +919,16 @@ class SimulationTab(QWidget):
                     return
                 self._cleanup_em_reports_if_needed()
                 self._pending_em_run = None
-                self.send_status.emit("Simulation completed")
+                self.send_status.emit(pick(self.lang, "Simulación completada", "Simulation completed"))
+                self._update_run_summary(status=pick(self.lang, "EM listo", "EM ready"))
             return
 
         if code == 0 and self._pending_em_run is not None:
-            summary = f"\nSimulation finished: exit={code} status={status}\n"
+            summary = pick(
+                self.lang,
+                f"\nSimulación finalizada: exit={code} estado={status}\n",
+                f"\nSimulation finished: exit={code} status={status}\n",
+            )
             self._append_log(summary)
             self._load_waveforms()
             self.refresh_history()
@@ -600,6 +936,7 @@ class SimulationTab(QWidget):
                 self._set_simulation_running(False)
                 self._pending_em_run = None
                 self.send_status.emit("EM instrumented netlist generated")
+                self._update_run_summary(status=pick(self.lang, "Netlist EM listo", "EM netlist ready"))
                 return
             self._append_log(
                 f"Starting EM extraction using instrumented netlist: {self._pending_em_run['netlist_path']}\n"
@@ -607,20 +944,27 @@ class SimulationTab(QWidget):
             )
             self.send_status.emit("EM extraction running")
             self._running_em_followup = True
+            self._update_run_summary(status=pick(self.lang, "Extracción EM", "EM extraction"))
             self.runner.run(self._pending_em_run["spec"])
             return
 
         self._set_simulation_running(False)
-        summary = f"\nSimulation finished: exit={code} status={status}\n"
+        summary = pick(
+            self.lang,
+            f"\nSimulación finalizada: exit={code} estado={status}\n",
+            f"\nSimulation finished: exit={code} status={status}\n",
+        )
         self._append_log(summary)
         full_text = self.log.toPlainText()
         if LogParser.has_errors(full_text) or code != 0:
             self._pending_em_run = None
-            self.send_status.emit("Simulation failed")
+            self.send_status.emit(pick(self.lang, "Simulación fallida", "Simulation failed"))
+            self._update_run_summary(status=pick(self.lang, "Falló", "Failed"))
         else:
             self._load_waveforms()
             self.refresh_history()
-            self.send_status.emit("Simulation completed")
+            self.send_status.emit(pick(self.lang, "Simulación completada", "Simulation completed"))
+            self._update_run_summary(status=pick(self.lang, "Lista", "Ready"))
 
     def open_output_folder(self) -> None:
         if self.output_dir.text().strip():
@@ -637,6 +981,7 @@ class SimulationTab(QWidget):
             return
         try:
             self._load_waveforms_from_path(Path(raw_path))
+            self._update_run_summary(status=pick(self.lang, "Historial cargado", "History loaded"))
         except Exception as exc:
             self._append_log(f"Failed to load selected history: {exc}\n")
             self.send_status.emit("Failed to load previous simulation")
@@ -663,6 +1008,7 @@ class SimulationTab(QWidget):
         elif self.history_select.count():
             self.history_select.setCurrentIndex(0)
         self.history_select.blockSignals(False)
+        self._update_run_summary()
 
     def _load_waveforms_from_path(self, raw_path: Path | None) -> None:
         if not raw_path:
@@ -690,6 +1036,7 @@ class SimulationTab(QWidget):
 
         self._update_measurements()
         self._append_log(f"Loaded waveform data from: {raw_path}\n")
+        self._update_run_summary(status=pick(self.lang, "Waveform cargado", "Waveform loaded"))
 
     def _resolve_raw_path(self) -> Path | None:
         candidates: list[Path] = []
@@ -915,7 +1262,11 @@ class SimulationTab(QWidget):
         return points
 
     def _write_generated_netlist(self, outputs: OutputPaths) -> Path:
-        source_text = apply_model_corner(self.file_view.toPlainText(), self.corner.currentText())
+        source_text = ensure_sky130_model_lib(
+            self.file_view.toPlainText(),
+            self.settings.pdk_paths.sky130a,
+        )
+        source_text = apply_model_corner(source_text, self.corner.currentText())
         analysis_type = self._analysis_type_key()
         params = {
             "tran_step": self.tran_step.text().strip(),
@@ -939,6 +1290,13 @@ class SimulationTab(QWidget):
             analysis_params=params,
             save_points=self._selected_probe_points(),
             extra_directives=self.extra_directives.toPlainText(),
+            preferred_subckt=Path(self.netlist_edit.text().strip() or "").stem,
+            wrapper_options={
+                "tiny_tapeout_initial_conditions": self.postlayout_use_ic.isChecked(),
+                "tiny_tapeout_load_mode": str(self.postlayout_load_mode.currentData()),
+                "tiny_tapeout_load_cap_value": self.postlayout_load_cap.text().strip(),
+                "tiny_tapeout_load_res_value": self.postlayout_load_res.text().strip(),
+            },
         )
 
         generated_path = outputs.results / "run.spice"
@@ -1018,6 +1376,21 @@ class SimulationTab(QWidget):
         em_enabled = self._em_workflow_requested()
         self.em_project_mode.setEnabled(em_enabled)
         self.keep_em_files_checkbox.setEnabled(em_enabled)
+
+    def _sync_postlayout_load_controls(self) -> None:
+        mode = str(self.postlayout_load_mode.currentData())
+        self.postlayout_load_cap.setEnabled(mode in {"cap", "rc"})
+        self.postlayout_load_res.setEnabled(mode == "rc")
+
+    def _update_run_summary(self, status: str | None = None) -> None:
+        self.summary_status_value.setText(status or self.summary_status_value.text())
+        output_text = self.output_dir.text().strip() or "—"
+        deck_text = self.generated_path_edit.text().strip() or "—"
+        waveform_path = self._resolve_raw_path()
+        waveform_text = waveform_path.name if waveform_path else pick(self.lang, "Sin cargar", "Not loaded")
+        self.summary_output_value.setText(Path(output_text).name if output_text != "—" else output_text)
+        self.summary_generated_value.setText(Path(deck_text).name if deck_text != "—" else deck_text)
+        self.summary_waveform_value.setText(waveform_text)
 
     def _ensure_em_workspace_dirs(self) -> dict[str, Path]:
         if not self._em_workspace_paths:
@@ -1140,10 +1513,12 @@ class SimulationTab(QWidget):
                 for value in spectrum.magnitudes
             ]
             self.spectrum_plot.setTitle(
-                f"{pick(self.lang, 'Espectro de frecuencia', 'Frequency Spectrum')} · {signal_name}"
+                f"{pick(self.lang, 'Espectro', 'Spectrum')}  {signal_name}",
+                color="#0f172a",
+                size="12pt",
             )
             self.spectrum_plot.setLabel("left", "dB", units="dB")
-            self.spectrum_plot.plot(spectrum.frequencies, spectrum_db, pen=pg.mkPen("#ffb000", width=2))
+            self.spectrum_plot.plot(spectrum.frequencies, spectrum_db, pen=pg.mkPen("#d97706", width=2.2))
             self._capture_spectrum_ranges(spectrum.frequencies, spectrum_db)
             self._update_spectrum_stats(
                 spectrum.frequencies,
@@ -1161,15 +1536,19 @@ class SimulationTab(QWidget):
         self._apply_spectrum_scale()
 
     def _configure_spectrum_plot_appearance(self) -> None:
-        self.spectrum_plot.setBackground("#0f1722")
+        self.spectrum_plot.setBackground("#ffffff")
         plot_item = self.spectrum_plot.getPlotItem()
         plot_item.showAxis("left")
         plot_item.showAxis("bottom")
-        self.spectrum_plot.showGrid(x=True, y=True, alpha=0.28)
+        plot_item.getViewBox().setBackgroundColor("#ffffff")
+        self.spectrum_plot.showGrid(x=True, y=True, alpha=0.24)
         for axis_name in ("left", "bottom"):
             axis = plot_item.getAxis(axis_name)
-            axis.setPen(pg.mkPen("#c7d2e2", width=1.2))
-            axis.setTextPen(pg.mkPen("#e6edf7"))
+            axis.setPen(pg.mkPen("#94a3b8", width=1.15))
+            axis.setTextPen(pg.mkPen("#334155"))
+            axis.setTickPen(pg.mkPen("#cbd5e1", width=1.0))
+        plot_item.getAxis("left").setStyle(tickTextOffset=10)
+        plot_item.getAxis("bottom").setStyle(tickTextOffset=10)
 
     def _capture_spectrum_ranges(self, x: list[float], y: list[float]) -> None:
         if not x or not y:
@@ -1236,7 +1615,7 @@ class SimulationTab(QWidget):
     def _clear_spectrum_plot(self) -> None:
         self.spectrum_plot.clear()
         self.spectrum_plot.hide()
-        self.spectrum_plot.setTitle(pick(self.lang, "Espectro de frecuencia", "Frequency Spectrum"))
+        self.spectrum_plot.setTitle("")
         self._spectrum_base_x_range = None
         self._spectrum_base_y_range = None
         self._current_spectrum_signal_name = ""
@@ -1300,9 +1679,7 @@ class SimulationTab(QWidget):
         finally:
             self.spectrum_plot.setBackground(original_background)
             plot_item.setTitle(original_title)
-            for axis in axes.values():
-                axis.setPen(pg.mkPen("#c7d2e2", width=1.2))
-                axis.setTextPen(pg.mkPen("#e6edf7"))
+            self._configure_spectrum_plot_appearance()
 
         QMessageBox.information(
             self,
@@ -1346,7 +1723,10 @@ class SimulationTab(QWidget):
         return "V"
 
     def _toggle_netlist_editor(self, checked: bool) -> None:
-        self.netlist_editor_box.setVisible(checked)
+        if self.netlist_section is not None:
+            self.netlist_section.set_expanded(checked)
+        else:
+            self.netlist_editor_box.setVisible(checked)
 
     def _paste_netlist(self) -> None:
         dialog = QDialog(self)
@@ -1378,7 +1758,10 @@ class SimulationTab(QWidget):
 
         saved_path = self._store_pasted_netlist(file_name_edit.text(), netlist_text)
         self.load_netlist_path(str(saved_path))
-        self.edit_netlist_btn.setChecked(True)
+        if self.netlist_section is not None:
+            self.netlist_section.set_expanded(True)
+        else:
+            self.netlist_editor_box.setVisible(True)
         self._append_log(f"Pasted netlist saved to: {saved_path}\n")
 
     def _store_pasted_netlist(self, requested_name: str, netlist_text: str) -> Path:
@@ -1396,7 +1779,7 @@ class SimulationTab(QWidget):
     def _show_log_dialog(self) -> None:
         if self.log_dialog is None:
             self.log_dialog = QDialog(self)
-            self.log_dialog.setWindowTitle("Simulation Log")
+            self.log_dialog.setWindowTitle(pick(self.lang, "Log de simulación", "Simulation Log"))
             self.log_dialog.resize(900, 700)
             dialog_layout = QVBoxLayout(self.log_dialog)
             self.log_viewer = QTextEdit()
@@ -1427,6 +1810,8 @@ class SimulationTab(QWidget):
         self.rerun_btn.setDisabled(running)
         self.stop_btn.setEnabled(running)
         self.loading_bar.setVisible(running)
+        if running:
+            self.summary_status_value.setText(pick(self.lang, "Corriendo", "Running"))
 
     def _ensure_editor_content(self) -> str:
         if self.file_view.toPlainText().strip():

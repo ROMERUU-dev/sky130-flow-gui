@@ -23,7 +23,37 @@ class ProjectManager:
         self.output_manager = output_manager or OutputManager()
 
     def set_project(self, path: str) -> None:
-        self.current_project = Path(path)
+        self.current_project = self.normalize_project_root(path)
+
+    @staticmethod
+    def normalize_project_root(path: str | Path) -> Path:
+        """Prefer the actual project root when the user points at flow subfolders."""
+        candidate = Path(path).expanduser().resolve()
+
+        for ancestor in [candidate, *candidate.parents]:
+            if ancestor.name == "runs":
+                return ancestor.parent
+
+        flow_subdirs = {
+            "mag",
+            "sch",
+            "sim",
+            "xschem",
+            "layout",
+            "gds",
+            "def",
+            "lef",
+            "src",
+            "logs",
+            "results",
+            "lvs",
+            "extraction",
+            "antenna",
+        }
+        if candidate.name in flow_subdirs and candidate.parent != candidate:
+            return candidate.parent
+
+        return candidate
 
     def outputs(self) -> OutputPaths:
         """Return standardized outputs for current context."""

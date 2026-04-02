@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 from app.core.i18n import pick
@@ -17,10 +18,30 @@ from app.ui.splash import StartupSplash
 MIN_SPLASH_SECONDS = 10.0
 
 
+def _build_forced_palette() -> QPalette:
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor("#fffdfb"))
+    palette.setColor(QPalette.WindowText, QColor("#172033"))
+    palette.setColor(QPalette.Base, QColor("#ffffff"))
+    palette.setColor(QPalette.AlternateBase, QColor("#fff7fb"))
+    palette.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
+    palette.setColor(QPalette.ToolTipText, QColor("#172033"))
+    palette.setColor(QPalette.Text, QColor("#172033"))
+    palette.setColor(QPalette.Button, QColor("#fff7fb"))
+    palette.setColor(QPalette.ButtonText, QColor("#172033"))
+    palette.setColor(QPalette.BrightText, QColor("#ffffff"))
+    palette.setColor(QPalette.Highlight, QColor("#bfdbfe"))
+    palette.setColor(QPalette.HighlightedText, QColor("#172033"))
+    palette.setColor(QPalette.Link, QColor("#2563eb"))
+    return palette
+
+
 def main() -> int:
     """Run the Qt application."""
     start_time = time.monotonic()
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setPalette(_build_forced_palette())
     app.setApplicationName("SKY130 Flow GUI")
     app.setOrganizationName("OpenLane Users")
     settings = SettingsManager().load()

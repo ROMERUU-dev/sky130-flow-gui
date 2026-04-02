@@ -6,6 +6,7 @@ import cmath
 import math
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 
 ANALYSIS_DIRECTIVES = (".tran", ".ac", ".dc", ".save", ".plot", ".print", ".four")
@@ -90,25 +91,54 @@ def build_generated_netlist(
     analysis_params: dict[str, str],
     save_points: list[str],
     extra_directives: str,
+    preferred_subckt: str = "",
+    wrapper_options: dict[str, object] | None = None,
 ) -> str:
     """Inject generated analysis directives into a temporary simulation netlist."""
     cleaned_lines: list[str] = []
     inserted = False
+    wrapper_lines = _auto_wrapper_lines(source_text, preferred_subckt, wrapper_options or {})
 
     for line in source_text.splitlines():
         stripped = line.strip().lower()
         if stripped.startswith(ANALYSIS_DIRECTIVES):
             continue
         if not inserted and stripped == ".end":
+            if wrapper_lines:
+                cleaned_lines.extend(wrapper_lines)
             cleaned_lines.extend(_generated_directives(analysis_type, analysis_params, save_points, extra_directives))
             inserted = True
         cleaned_lines.append(line)
 
     if not inserted:
+        if wrapper_lines:
+            cleaned_lines.extend(wrapper_lines)
         cleaned_lines.extend(_generated_directives(analysis_type, analysis_params, save_points, extra_directives))
         cleaned_lines.append(".end")
 
     return "\n".join(cleaned_lines).rstrip() + "\n"
+
+
+def ensure_sky130_model_lib(source_text: str, sky130a_path: str) -> str:
+    """Prepend the SKY130 model library when an extracted netlist needs it."""
+    lowered = source_text.lower()
+    if "sky130.lib.spice" in lowered:
+        return source_text
+
+    if "sky130_fd_pr__" not in lowered and "sky130_fd_sc_" not in lowered:
+        return source_text
+
+    sky130a = sky130a_path.strip()
+    if not sky130a:
+        return source_text
+
+    lib_path = Path(sky130a).expanduser() / "libs.tech" / "ngspice" / "sky130.lib.spice"
+    lines = [
+        f".lib {lib_path} tt",
+        "",
+        source_text.lstrip(),
+    ]
+    return "\n".join(lines)
 
 
 def analyze_signal(
@@ -372,6 +402,221 @@ def _largest_power_of_two(value: int) -> int:
 
 def _is_valid_node_name(token: str) -> bool:
     return bool(token) and token not in {"0", "gnd"} and re.fullmatch(r"[A-Za-z0-9_:/#$.+-]+", token) is not None
+
+
+def _auto_wrapper_lines(source_text: str, preferred_subckt: str, wrapper_options: dict[str, object]) -> list[str]:
+    if _has_top_level_instances(source_text):
+        return []
+
+    subckts = _parse_subckts(source_text)
+    if not subckts:
+        return []
+
+    selected_name, selected_pins = _pick_wrapper_subckt(subckts, preferred_subckt)
+    if not selected_name or not selected_pins:
+        return []
+
+    if _looks_like_tiny_tapeout_wrapper(selected_name, selected_pins):
+        return _tiny_tapeout_wrapper_lines(selected_name, selected_pins, wrapper_options)
+
+    lines = [
+        "",
+        f"* Auto-generated wrapper for extracted subckt {selected_name}",
+    ]
+    added_sources: set[str] = set()
+    for pin in selected_pins:
+        source_line = _default_pin_source(pin)
+        if source_line and source_line not in added_sources:
+            added_sources.add(source_line)
+            lines.append(source_line)
+
+    instance_nodes = " ".join(selected_pins)
+    lines.append(f"Xdut {instance_nodes} {selected_name}")
+    return lines
+
+
+def _has_top_level_instances(source_text: str) -> bool:
+    in_subckt = False
+    for raw_line in source_text.splitlines():
+        stripped = raw_line.strip()
+        lowered = stripped.lower()
+        if not stripped or stripped.startswith("*") or stripped.startswith(";"):
+            continue
+        if lowered.startswith(".subckt"):
+            in_subckt = True
+            continue
+        if lowered.startswith(".ends"):
+            in_subckt = False
+            continue
+        if in_subckt:
+            continue
+        if stripped.startswith(".") or stripped.startswith("+"):
+            continue
+        return True
+    return False
+
+
+def _parse_subckts(source_text: str) -> list[tuple[str, list[str]]]:
+    subckts: list[tuple[str, list[str]]] = []
+    active_name = ""
+    active_pins: list[str] = []
+    collecting = False
+
+    for raw_line in source_text.splitlines():
+        stripped = raw_line.strip()
+        lowered = stripped.lower()
+
+        if lowered.startswith(".subckt "):
+            if active_name:
+                subckts.append((active_name, active_pins))
+            parts = stripped.split()
+            active_name = parts[1] if len(parts) >= 2 else ""
+            active_pins = parts[2:] if len(parts) >= 3 else []
+            collecting = True
+            continue
+
+        if collecting and stripped.startswith("+"):
+            active_pins.extend(stripped[1:].split())
+            continue
+
+        if active_name:
+            subckts.append((active_name, active_pins))
+            active_name = ""
+            active_pins = []
+        collecting = False
+
+    if active_name:
+        subckts.append((active_name, active_pins))
+    return subckts
+
+
+def _pick_wrapper_subckt(subckts: list[tuple[str, list[str]]], preferred_subckt: str) -> tuple[str, list[str]]:
+    normalized_preferred = preferred_subckt.strip().lower()
+    if normalized_preferred.endswith("_extracted"):
+        normalized_preferred = normalized_preferred[: -len("_extracted")]
+    if normalized_preferred:
+        for name, pins in subckts:
+            if name.lower() == normalized_preferred:
+                return name, pins
+    return subckts[-1]
+
+
+def _default_pin_source(pin: str) -> str:
+    normalized = pin.strip().lower()
+    source_name = re.sub(r"[^a-zA-Z0-9_]+", "_", pin).strip("_") or "pin"
+    if normalized in {"vdd", "vpwr", "vdpwr", "vccd1", "vccd2", "vdda", "vdda1", "vdda2", "vpb"}:
+        return f"V{source_name} {pin} 0 1.8"
+    if normalized in {"gnd", "vgnd", "vssd1", "vssd2", "vssa", "vssa1", "vssa2", "vnb", "vsub", "vsubs"}:
+        return f"V{source_name} {pin} 0 0"
+    if normalized in {"ena", "en", "enable", "rst_n", "reset_n"}:
+        return f"V{source_name} {pin} 0 1.8"
+    if normalized in {"clk", "clock"}:
+        return f"V{source_name} {pin} 0 PULSE(0 1.8 0 100p 100p 5n 10n)"
+    if (
+        normalized.startswith("ua[")
+        or normalized.startswith("ui_in[")
+        or normalized.startswith("uio_in[")
+        or normalized.startswith("uio_oe[")
+    ):
+        return f"V{source_name} {pin} 0 0"
+    return ""
+
+
+def _looks_like_tiny_tapeout_wrapper(subckt_name: str, pins: list[str]) -> bool:
+    normalized_name = subckt_name.strip().lower()
+    normalized_pins = {pin.strip().lower() for pin in pins}
+    return normalized_name.startswith("tt_um_") or (
+        {"clk", "ena", "rst_n", "vdpwr", "vgnd"}.issubset(normalized_pins)
+        and any(pin.startswith("uo_out[") for pin in normalized_pins)
+        and any(pin.startswith("ui_in[") for pin in normalized_pins)
+    )
+
+
+def _tiny_tapeout_wrapper_lines(subckt_name: str, pins: list[str], wrapper_options: dict[str, object]) -> list[str]:
+    include_ic = bool(wrapper_options.get("tiny_tapeout_initial_conditions", True))
+    load_mode = str(wrapper_options.get("tiny_tapeout_load_mode", "cap")).strip().lower()
+    load_cap_value = str(wrapper_options.get("tiny_tapeout_load_cap_value", "10f")).strip() or "10f"
+    load_res_value = str(wrapper_options.get("tiny_tapeout_load_res_value", "1k")).strip() or "1k"
+    lines = [
+        "",
+        f"* Auto-generated Tiny Tapeout post-layout wrapper for {subckt_name}",
+        ".option method=gear",
+        ".option reltol=1e-4",
+        ".option gmin=1e-12",
+        ".temp 27",
+    ]
+
+    added_sources: set[str] = set()
+    for pin in pins:
+        source_line = _tiny_tapeout_pin_source(pin)
+        if source_line and source_line not in added_sources:
+            added_sources.add(source_line)
+            lines.append(source_line)
+
+    if load_mode not in {"none", "off", "disabled"}:
+        for pin in pins:
+            for load_line in _tiny_tapeout_load(pin, load_mode, load_cap_value, load_res_value):
+                lines.append(load_line)
+
+    instance_nodes = " ".join(pins)
+    lines.append(f"Xdut {instance_nodes} {subckt_name}")
+
+    if include_ic:
+        ic_line = _tiny_tapeout_initial_conditions(pins)
+        if ic_line:
+            lines.append(ic_line)
+
+    return lines
+
+
+def _tiny_tapeout_pin_source(pin: str) -> str:
+    normalized = pin.strip().lower()
+    source_name = re.sub(r"[^a-zA-Z0-9_]+", "_", pin).strip("_") or "pin"
+
+    if normalized == "vdpwr":
+        return f"V{source_name} {pin} 0 1.8"
+    if normalized in {"vgnd", "vnb", "vpb", "vsub", "vsubs"}:
+        return f"V{source_name} {pin} 0 0"
+    if normalized == "clk":
+        return f"V{source_name} {pin} 0 0"
+    if normalized in {"ena", "en", "enable", "rst_n", "reset_n"}:
+        return f"V{source_name} {pin} 0 1.8"
+    if (
+        normalized.startswith("ua[")
+        or normalized.startswith("ui_in[")
+        or normalized.startswith("uio_in[")
+        or normalized.startswith("uio_oe[")
+    ):
+        return f"V{source_name} {pin} 0 0"
+    return ""
+
+
+def _tiny_tapeout_load(pin: str, load_mode: str, cap_value: str, res_value: str) -> list[str]:
+    normalized = pin.strip().lower()
+    base_name = re.sub(r"[^a-zA-Z0-9_]+", "_", pin).strip("_") or "node"
+    eligible = normalized.startswith("uo_out[") or normalized.startswith("uio_out[") or normalized.startswith("osc_")
+    if not eligible:
+        return []
+
+    if load_mode in {"cap", "c"}:
+        return [f"CLOAD_{base_name} {pin} 0 {cap_value}"]
+
+    if load_mode == "rc":
+        load_node = f"{pin}__load"
+        return [
+            f"RLOAD_{base_name} {pin} {load_node} {res_value}",
+            f"CLOAD_{base_name} {load_node} 0 {cap_value}",
+        ]
+
+    return []
+
+
+def _tiny_tapeout_initial_conditions(pins: list[str]) -> str:
+    normalized_pins = {pin.strip().lower() for pin in pins}
+    required = [f"uo_out[{index}]" for index in range(4)]
+    if not all(name in normalized_pins for name in required):
+        return ""
+    return ".ic v(uo_out[0])=0.9 v(uo_out[1])=0 v(uo_out[2])=0.9 v(uo_out[3])=0"
 
 
 def apply_model_corner(source_text: str, corner: str) -> str:

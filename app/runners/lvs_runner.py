@@ -14,7 +14,9 @@ class LvsRunner(BaseRunner):
     def run_spec(
         self,
         layout_netlist: str,
+        layout_top: str,
         schematic_netlist: str,
+        schematic_top: str,
         setup_tcl: str,
         outputs: OutputPaths,
     ) -> tuple[list[str], str]:
@@ -23,12 +25,14 @@ class LvsRunner(BaseRunner):
         report_path = str(outputs.lvs / f"lvs_{layout_stem}_vs_{schematic_stem}.log")
 
         self.ensure_parent(report_path)
+        layout_target = f"{layout_netlist} {layout_top.strip()}" if layout_top.strip() else layout_netlist
+        schematic_target = f"{schematic_netlist} {schematic_top.strip()}" if schematic_top.strip() else schematic_netlist
         command = [
             self.settings.tool_paths.netgen,
             "-batch",
             "lvs",
-            layout_netlist,
-            schematic_netlist,
+            layout_target,
+            schematic_target,
             setup_tcl,
             report_path,
         ]
