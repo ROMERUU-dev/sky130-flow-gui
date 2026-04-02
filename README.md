@@ -1,263 +1,215 @@
-# SKY130 Flow GUI (Linux Desktop MVP)
+# SKY130 Flow GUI
 
-A Python/PySide6 desktop workflow manager for SKY130 analog/custom IC tasks.  
-It **does not replace** xschem, magic, klayout, ngspice, or netgen; it orchestrates them from a clean GUI.
+A Linux desktop app for managing a practical SKY130 workflow from a single interface.
 
-## MVP Features
+It does not replace `xschem`, `magic`, `ngspice`, `netgen`, or `klayout`. It coordinates them, keeps outputs organized, and gives you a cleaner workflow for schematic, post-layout, and validation tasks.
 
-- Native Linux desktop app (PySide6)
-- Non-blocking command execution using `QProcess`
-- Tabs for:
-  - Simulation (`ngspice`)
-  - LVS (`netgen`)
-  - Extraction/Post-layout (`magic`)
-  - Antenna Check (`klayout`)
-  - EM Sizing (`ngspice` current waveform analysis for routing estimates)
-  - Project/Files
-  - Preferences
-- Persistent preferences and recent projects (`QSettings`)
-- Environment/path validation with status table
-- Exact command shown in logs for reproducibility
-- Standardized run outputs under project `runs/` directories
-- Stop running jobs
-- Send extracted netlist to simulation tab
-- Technical, dark-mode friendly default Qt styling
+## What It Does
 
-## Project Structure
+- Simulation with waveform and spectrum viewing
+- Post-layout extraction flow with Magic
+- LVS flow with Netgen
+- Antenna check flow with KLayout
+- EM sizing support from waveform data
+- Project-aware output management under `runs/`
+- Persistent preferences and recent projects
+- Setup Assistant for validating and bootstrapping the environment on Ubuntu
 
-```text
-app/
-  main.py
-  core/
-    command_runner.py
-    env_validator.py
-    log_parser.py
-    output_manager.py
-    project_manager.py
-    settings_manager.py
-    update_manager.py
-    integration_manager.py
-  runners/
-    base_runner.py
-    ngspice_runner.py
-    lvs_runner.py
-    magic_runner.py
-    antenna_runner.py
-  resources/
-    sky130-flow-gui.svg
-  data/
-    sky130_em_profiles.json
-  models/
-    em_models.py
-  services/
-    em_service.py
-  ui/
-    main_window.py
-    simulation_tab.py
-    lvs_tab.py
-    extraction_tab.py
-    antenna_tab.py
-    em_sizing_tab.py
-    project_tab.py
-    preferences_tab.py
-    waveform_viewer.py
-    splash.py
-    widgets.py
-requirements.txt
-README.md
-```
+## Current UI
 
-## Install
+The app currently includes:
+
+- Left-side navigation
+- Refined light theme
+- Collapsible simulation panels
+- Post-layout wrapper controls for:
+  - initial conditions
+  - no load / capacitive load / series RC load
+- Waveform and frequency-spectrum viewers
+- Setup wizard for:
+  - reviewing the system
+  - installing core tools on Ubuntu
+  - applying detected paths
+  - final validation
+
+## Main Tabs
+
+- `Simulación / Simulation`
+- `LVS`
+- `Extracción / Extraction`
+- `Antena / Antenna`
+- `EM`
+- `Entorno / Setup`
+- `Proyecto / Project`
+- `Preferencias / Preferences`
+
+## Installation
+
+### Option 1: Manual Python setup
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python -m app.main
 ```
 
-## Run
+### Option 2: Use the Setup Assistant from the app
+
+If the GUI already opens on your machine, go to `⬢ Entorno / Setup` and follow the wizard.
+
+The Ubuntu bootstrap currently installs the base toolchain:
+
+- `xschem`
+- `ngspice`
+- `magic`
+- `netgen`
+- `klayout`
+- `python3`, `python3-pip`, `python3-venv`
+
+It also prepares the project `.venv` and installs Python requirements from `requirements.txt`.
+
+## Ubuntu Environment Notes
+
+The app works best when these are available:
+
+- Linux desktop session
+- `xschem`
+- `ngspice`
+- `magic`
+- `netgen`
+- `klayout`
+- `PDK_ROOT`
+- `SKY130A`
+
+The Setup Assistant can detect common installations and apply discovered paths automatically.
+
+Important:
+
+- the tool bootstrap is implemented for Ubuntu/Debian-style systems using `apt`
+- the PDK may still need manual installation or manual path review depending on the machine
+- final foundry signoff is still outside the scope of this GUI
+
+## Running the App
+
+From the repository root:
 
 ```bash
 python -m app.main
 ```
 
-## Simulation Guide
+If you are using a virtual environment:
 
-- Detailed Spanish guide for the simulation/visualization workflow:
-  - `docs/SIMULATION_GUIDE_ES.md`
+```bash
+source .venv/bin/activate
+python -m app.main
+```
 
-## EM Sizing Tab
+## Post-Layout Flow
 
-The **EM Sizing** tab is an engineering support tool for reviewing branch currents exported from `ngspice` and estimating interconnect sizing decisions for manual SKY130 / Tiny Tapeout routing.
+The app now supports a more practical post-layout workflow:
+
+- normalizes project roots correctly
+- keeps extracted and simulation outputs under the main project `runs/`
+- detects top cells from `mag/`
+- can send extracted netlists directly to Simulation
+- can build a post-layout simulation wrapper automatically for Tiny Tapeout-style blocks
+
+Wrapper options include:
+
+- use initial conditions
+- no load
+- capacitive load
+- series RC load
+
+## Output Policy
+
+Generated files are stored in the active project when a project is selected:
+
+- `runs/logs`
+- `runs/results`
+- `runs/lvs`
+- `runs/extraction`
+- `runs/antenna`
+
+If no project is selected, the app falls back to repository-local `workspace/` directories.
+
+## Setup Assistant
+
+The `⬢ Entorno / Setup` tab is the recommended starting point on a new machine.
+
+It provides:
+
+1. System review
+2. Ubuntu tool installation
+3. Automatic path application
+4. Final validation
+
+It also summarizes readiness for:
+
+- Tools
+- PDK
+- Python
+- Overall environment
+
+## Preferences
+
+The `Preferencias / Preferences` tab is still the place for:
+
+- fine-tuning tool paths
+- adjusting PDK paths
+- validating the environment manually
+- updating the local installation
+- installing the desktop launcher/icon
+
+## EM Sizing
+
+The EM sizing flow is a support tool for estimating routing decisions from current waveforms.
 
 It can:
 
-- Load current waveform files from `ngspice` outputs
-- Support CSV and whitespace-separated `wrdata`-style text files
-- Compute `I_avg`, `I_rms`, and `I_peak`
-- Classify branches as `power`, `output`, or `signal`
-- Apply `average`, `rms`, `peak`, or conservative `auto` design-metric selection
-- Recommend metal width from estimated current-density rules plus DRC minimum and routing-grid rounding
-- Recommend via count and a compact via array
-- Export results to CSV, JSON, and plain text
+- load current waveform files
+- compute current metrics
+- suggest routing widths and via counts
 
-Important limits:
+It is not foundry-qualified EM signoff.
 
-- This is an **engineering estimation tool**, not official foundry EM signoff.
-- EM/current-density values in `app/data/sky130_em_profiles.json` are configurable, conservative, user-defined estimates.
-- DRC minimum width and EM sizing are handled separately in the calculations and UI.
-- Final signoff must still use foundry-qualified rules and the proper signoff flow.
+## Install as a Desktop App
 
-Supported waveform file shape:
+From `Preferences`, use `Install application icon`.
 
-- First column must be time
-- Remaining columns are current branches
-- Header row is optional
-- Scientific notation, blank lines, extra spaces, and simple comment lines are accepted
+That creates:
 
-Profile units:
-
-- thickness: `um`
-- minimum width: `um`
-- routing grid: `um`
-- current density: `mA/um^2`
-- via current: `mA`
-
-Example usage:
-
-1. Export branch current waveforms from `ngspice` to CSV or whitespace-separated text.
-2. Open **EM Sizing** and load the file or use **Load Latest Result**.
-3. Choose the profile, design metric, target metal, via type, and margin factor.
-4. Review per-branch recommendations, warnings, and the detail panel before routing in Magic.
-
-## SKY130 Environment Assumptions
-
-1. You are on Linux with desktop access.
-2. Tools are installed and runnable from PATH or explicitly configured:
-   - `xschem`, `ngspice`, `magic`, `netgen`, `klayout`
-3. PDK is installed and SKY130A content is available.
-4. You can provide paths for:
-   - `PDK_ROOT`
-   - `SKY130A`
-   - magic rcfile
-   - netgen setup tcl
-   - klayout antenna deck/script
-
-## Notes for Real Installations
-
-- In **Preferences**, configure absolute tool paths and PDK paths.
-- Use **Validate** to identify missing executables/files.
-- The app injects `PDK_ROOT` and `SKY130A` into subprocess environments.
-- For extraction in Magic:
-  - Provide top cell name
-  - Either select an existing extraction script or let app generate one
-- For LVS:
-  - Provide extracted and schematic netlists
-  - Provide `sky130A_setup.tcl` from your PDK
-- For antenna checks:
-  - Provide a KLayout-compatible rule deck/script
-
-## MVP Limitations
-
-- Waveform plotting is ready to receive real parsed simulation traces (no dummy/example traces are shown by default).
-- Log parsing is heuristic/simple and intended as a starting point.
-- EM sizing rules are conservative estimates and are not signoff-qualified.
-
-## Phase 2 Suggestions
-
-- DRC tab
-- Better ngspice raw parsing and selectable traces from real output
-- Pre-layout vs post-layout overlay comparisons
-- Project session file import/export
-- Simulation templates
-- Rich report export (PDF/HTML)
-- AppImage/PyInstaller packaging
-
-## Output Location Policy
-
-All generated files are stored either:
-
-- In the active project folder (preferred):
-  - `runs/logs`
-  - `runs/results`
-  - `runs/lvs`
-  - `runs/extraction`
-  - `runs/antenna`
-- Or, if no project is selected, in repository-local fallback workspace:
-  - `workspace/logs`
-  - `workspace/results`
-  - `workspace/lvs`
-  - `workspace/extraction`
-  - `workspace/antenna`
-
-No output is written to Desktop by default.
-
-## Update an Existing Installation
-
-If you already installed it from this repo, you have two options:
-
-1. From the GUI (`Preferences`):
-   - `Check for updates`
-   - `Update now`
-2. From the terminal:
-
-```bash
-git pull --ff-only
-```
-
-After updating, restart the application.
-
-## Install as an Application Icon (Linux)
-
-In the `Preferences` tab, use **Install application icon**.
-This creates:
-
-- `~/.local/bin/sky130-flow-gui` (launcher)
+- `~/.local/bin/sky130-flow-gui`
 - `~/.local/share/applications/sky130-flow-gui.desktop`
 - `~/.local/share/icons/hicolor/scalable/apps/sky130-flow-gui.svg`
 
-You will then be able to open it from your desktop applications menu.
+## Project Structure
 
-## How to Open the Application
-
-You can open it in 3 ways:
-
-1. From a terminal in the repo:
-
-```bash
-python -m app.main
+```text
+app/
+  core/
+  runners/
+  services/
+  ui/
+scripts/
+tests/
+requirements.txt
+README.md
 ```
 
-2. From the launcher (if you installed the icon):
+## Limitations
 
-```bash
-~/.local/bin/sky130-flow-gui
-```
+- The Ubuntu bootstrap does not guarantee a fully automatic SKY130 PDK installation on every machine.
+- Some flows still depend on the user having a valid external installation of the VLSI toolchain.
+- This app improves workflow management; it is not a replacement for signoff flows or foundry-qualified verification.
 
-3. From your desktop applications menu (entry: **SKY130 Flow GUI**).
+## Recommended Next Steps
 
-## Uninstall
+If you are using the project on a fresh Ubuntu machine:
 
-If you installed the icon/launcher, remove these files:
-
-```bash
-rm -f ~/.local/bin/sky130-flow-gui
-rm -f ~/.local/share/applications/sky130-flow-gui.desktop
-rm -f ~/.local/share/icons/hicolor/scalable/apps/sky130-flow-gui.svg
-update-desktop-database ~/.local/share/applications
-```
-
-To remove the app source code as well, delete the repository directory where you cloned it.
-
-## Push Changes Properly from Codex Web (Quick)
-
-1. Verify that you are on your working branch (for example `work`) and that your changes are committed.
-2. Publish the branch to the remote (`origin`): `git push -u origin work`.
-3. On GitHub, create the Pull Request: `work` -> `main`.
-4. If there are conflicts on GitHub:
-   - **Accept incoming**: keep what comes from the PR branch.
-   - **Accept current**: keep what the base branch already had.
-   - Recommended: review the final diff before confirming the merge.
-5. Click **Merge pull request** on GitHub and then on your local machine:
-   - `git checkout main`
-   - `git pull --ff-only origin main`
+1. Open `⬢ Entorno / Setup`
+2. Run the wizard
+3. Review `Preferences` only if something still needs manual tuning
+4. Select a project
+5. Start from `Extraction` or `Simulation`
