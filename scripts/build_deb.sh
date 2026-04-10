@@ -73,24 +73,19 @@ cat > "$PKG_DIR/DEBIAN/postinst" <<'EOF'
 set -euo pipefail
 
 APP_ROOT="/opt/sky130-flow-gui"
-TARGET_USER="${SUDO_USER:-}"
-if [ -z "$TARGET_USER" ] && [ -n "${PKEXEC_UID:-}" ]; then
-  TARGET_USER="$(id -nu "$PKEXEC_UID")"
-fi
 
-if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
-  runuser -u "$TARGET_USER" -- bash -lc "
-    set -euo pipefail
-    cd '$APP_ROOT'
-    python3 -m venv .venv
-    .venv/bin/python -m pip install --upgrade pip
-    .venv/bin/python -m pip install -r requirements.txt
-  " || true
-else
-  python3 -m venv "$APP_ROOT/.venv" || true
-  "$APP_ROOT/.venv/bin/python" -m pip install --upgrade pip || true
-  "$APP_ROOT/.venv/bin/python" -m pip install -r "$APP_ROOT/requirements.txt" || true
-fi
+cat <<MSG
+SKY130 Flow GUI was installed under $APP_ROOT.
+
+This package intentionally does not create $APP_ROOT/.venv during post-install.
+Prepare the Python environment later as the normal desktop user if needed:
+  cd "$APP_ROOT"
+  python3 -m venv .venv
+  .venv/bin/python -m pip install --upgrade pip
+  .venv/bin/python -m pip install -r requirements.txt
+
+Do not create or repair .venv under /opt with sudo/pkexec.
+MSG
 
 update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
 gtk-update-icon-cache /usr/share/icons/hicolor >/dev/null 2>&1 || true

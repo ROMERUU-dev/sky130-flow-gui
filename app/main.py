@@ -10,6 +10,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
+from app.core.env_validator import EnvValidator
 from app.core.i18n import pick
 from app.core.settings_manager import SettingsManager
 from app.ui.main_window import MainWindow
@@ -39,6 +40,16 @@ def _build_forced_palette() -> QPalette:
 def main() -> int:
     """Run the Qt application."""
     start_time = time.monotonic()
+    gui_diag = EnvValidator()._detect_gui_dependencies("en")
+    if gui_diag.missing_required:
+        missing = ", ".join(gui_diag.missing_required)
+        sys.stderr.write(
+            "Qt/X11 runtime dependencies are missing for PySide6 on Ubuntu.\n"
+            f"Missing packages: {missing}\n"
+            "Install the Ubuntu bootstrap packages or install the listed libraries before starting the GUI.\n"
+        )
+        return 1
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setPalette(_build_forced_palette())

@@ -144,12 +144,13 @@ class PreferencesTab(QWidget):
         self.settings_updated.emit(self.settings)
 
     def refresh_validation(self) -> None:
-        rows = self.validator.validate(self.settings)
+        diagnosis = self.validator.diagnose(self.settings, lang=self.lang)
+        rows = self.validator.validation_rows(diagnosis, lang=self.lang)
         self.status_table.setRowCount(len(rows))
-        for i, (item, (ok, detail)) in enumerate(rows.items()):
-            self.status_table.setItem(i, 0, QTableWidgetItem(item))
-            self.status_table.setItem(i, 1, QTableWidgetItem(pick(self.lang, "OK", "OK") if ok else pick(self.lang, "FALTA", "MISSING")))
-            self.status_table.setItem(i, 2, QTableWidgetItem(detail))
+        for i, row in enumerate(rows):
+            self.status_table.setItem(i, 0, QTableWidgetItem(row.item))
+            self.status_table.setItem(i, 1, QTableWidgetItem(row.status))
+            self.status_table.setItem(i, 2, QTableWidgetItem(row.detail))
         self.status_table.resizeColumnsToContents()
 
     def check_updates(self) -> None:

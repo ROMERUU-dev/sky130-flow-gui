@@ -4,6 +4,13 @@ A Linux desktop app for managing a practical SKY130 workflow from a single inter
 
 It does not replace `xschem`, `magic`, `ngspice`, `netgen`, or `klayout`. It coordinates them, keeps outputs organized, and gives you a cleaner workflow for schematic, post-layout, and validation tasks.
 
+The environment diagnostics are intentionally strict:
+
+- base EDA tools are validated separately from the SKY130 PDK
+- `netgen-lvs` is accepted as a valid Ubuntu-provided Netgen binary
+- a root-owned or non-writable `.venv` is reported explicitly
+- missing Qt/X11 runtime libraries for PySide6 on Ubuntu are flagged before the GUI starts
+
 ## What It Does
 
 - Simulation with waveform and spectrum viewing
@@ -54,20 +61,31 @@ pip install -r requirements.txt
 python -m app.main
 ```
 
+Create `.venv` as your normal user. Do not create or repair the repository virtualenv with `sudo` or `pkexec`.
+
 ### Option 2: Use the Setup Assistant from the app
 
 If the GUI already opens on your machine, go to `⬢ Entorno / Setup` and follow the wizard.
 
-The Ubuntu bootstrap currently installs the base toolchain:
+The Ubuntu bootstrap currently installs Ubuntu system packages only:
 
 - `xschem`
 - `ngspice`
 - `magic`
-- `netgen`
+- `netgen-lvs` (accepted by the app as Netgen)
 - `klayout`
 - `python3`, `python3-pip`, `python3-venv`
+- Qt/X11 runtime libraries for PySide6:
+  - required in practice on clean Ubuntu: `libxcb-cursor0`, `libxkbcommon-x11-0`, `libxcb-xkb1`, `libxcb-xfixes0`, `libgl1`
+  - preventive compatibility packages installed by the bootstrap: `libxcb-xinerama0`, `libxcb-icccm4`, `libxcb-image0`, `libxcb-keysyms1`, `libxcb-render-util0`, `libxcb-randr0`, `libxcb-shape0`
 
-It also prepares the project `.venv` and installs Python requirements from `requirements.txt`.
+It does not create or modify `.venv`. Prepare the Python environment afterwards as the normal user:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+```
 
 ## Ubuntu Environment Notes
 
@@ -77,7 +95,7 @@ The app works best when these are available:
 - `xschem`
 - `ngspice`
 - `magic`
-- `netgen`
+- `netgen` or `netgen-lvs`
 - `klayout`
 - `PDK_ROOT`
 - `SKY130A`
@@ -87,8 +105,38 @@ The Setup Assistant can detect common installations and apply discovered paths a
 Important:
 
 - the tool bootstrap is implemented for Ubuntu/Debian-style systems using `apt`
-- the PDK may still need manual installation or manual path review depending on the machine
+- installing apt packages does not install the SKY130 PDK automatically
+- the validator looks for `sky130A` in `PDK_ROOT`, `/usr/local/share/pdk`, `/usr/share/pdk`, `~/pdk`, `~/.volare`, and `~/eda/pdk`
+- the app checks `sky130A/libs.tech/magic`, `netgen`, `klayout`, `ngspice`, and `xschem` separately, so an incomplete PDK is reported as incomplete rather than OK
+- a repository under `/opt` may be readable but not writable for the current user; in that case `.venv` creation is intentionally reported as a permissions problem
+- if `.venv` belongs to `root`, the validator reports it explicitly instead of treating the Python environment as healthy
 - final foundry signoff is still outside the scope of this GUI
+
+## Ubuntu Qt/X11 Runtime Notes
+
+Installing `PySide6` with `pip` is not sufficient on a clean Ubuntu desktop if Qt/X11 runtime libraries are missing. A common failure mode is:
+
+- Qt finds the `xcb` platform plugin
+- the plugin still fails to load
+- the process exits because libraries such as `libxcb-cursor0` are missing
+
+The bootstrap installs the common runtime packages needed to avoid that first-run failure on Ubuntu. If you are setting up the environment manually, install at least:
+
+- `libxcb-cursor0`
+- `libxkbcommon-x11-0`
+- `libxcb-xkb1`
+- `libxcb-xfixes0`
+- `libgl1`
+
+The bootstrap also installs extra compatibility packages that are often helpful on clean or minimal systems:
+
+- `libxcb-xinerama0`
+- `libxcb-icccm4`
+- `libxcb-image0`
+- `libxcb-keysyms1`
+- `libxcb-render-util0`
+- `libxcb-randr0`
+- `libxcb-shape0`
 
 ## Running the App
 
@@ -151,6 +199,14 @@ It also summarizes readiness for:
 - PDK
 - Python
 - Overall environment
+
+The validator distinguishes between:
+
+- tool not installed
+- tool installed under an alternate binary name such as `netgen-lvs`
+- SKY130 PDK absent
+- SKY130 PDK incomplete
+- `.venv` missing, root-owned, or not writable
 
 ## Preferences
 
@@ -217,11 +273,12 @@ What this package does:
 - installs the app under `/opt/sky130-flow-gui`
 - installs a launcher under `/usr/bin/sky130-flow-gui`
 - installs a desktop entry and icon
-- creates a project `.venv` on install and installs `requirements.txt`
 
 What it does not do by itself:
 
 - install the full SKY130 PDK in every environment
+- guarantee that `/opt/sky130-flow-gui` is writable by the current desktop user for `.venv` creation
+- repair a root-owned `.venv`
 - replace the Setup Assistant
 - replace the Ubuntu bootstrap for the VLSI toolchain
 
@@ -237,6 +294,7 @@ Recommended flow after installing the `.deb`:
 ```text
 app/
   core/
+  resources/
   runners/
   services/
   ui/
@@ -250,6 +308,7 @@ README.md
 
 - The Ubuntu bootstrap does not guarantee a fully automatic SKY130 PDK installation on every machine.
 - Some flows still depend on the user having a valid external installation of the VLSI toolchain.
+- If you add a dedicated squirrel PNG for splash/branding, place it under `app/resources/` so startup code can resolve it independently of the current working directory. The current fallback asset is `app/resources/sky130-flow-gui.svg`.
 - This app improves workflow management; it is not a replacement for signoff flows or foundry-qualified verification.
 - The `.deb` packaging flow is designed for Ubuntu/Debian and assumes `dpkg-deb` is available on the build machine.
 

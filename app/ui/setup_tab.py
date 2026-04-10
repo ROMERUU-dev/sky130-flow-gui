@@ -249,8 +249,8 @@ class SetupTab(QWidget):
             self._page_hint(
                 pick(
                     self.lang,
-                    "Este paso lanza el bootstrap de Ubuntu para instalar xschem, ngspice, magic, netgen, klayout y dependencias base.",
-                    "This step launches the Ubuntu bootstrap to install xschem, ngspice, magic, netgen, klayout, and base dependencies.",
+                    "Este paso instala paquetes del sistema para Ubuntu: herramientas EDA base y librerías Qt/X11. No crea `.venv` ni toca el entorno Python del usuario.",
+                    "This step installs Ubuntu system packages: base EDA tools and Qt/X11 runtime libraries. It does not create `.venv` or touch the user-owned Python environment.",
                 )
             )
         )
@@ -396,26 +396,28 @@ class SetupTab(QWidget):
             self.step_list.setCurrentRow(self._current_step)
 
     def refresh_validation(self) -> None:
-        rows = self.validator.validate(self.settings)
-        ok_count = sum(1 for ok, _ in rows.values() if ok)
+        diagnosis = self.validator.diagnose(self.settings, lang=self.lang)
+        rows = self.validator.validation_rows(diagnosis, lang=self.lang)
+        ok_count = sum(1 for row in rows if row.ok)
         total = len(rows)
         self.summary_label.setText(
             pick(
                 self.lang,
-                f"Listos: {ok_count}/{total}. Completa los pasos hasta dejar todo en OK.",
-                f"Ready: {ok_count}/{total}. Complete the steps until everything is OK.",
+                f"Checks correctos: {ok_count}/{total}. Herramientas, PDK y `.venv` se validan por separado.",
+                f"Passing checks: {ok_count}/{total}. Tools, PDK, and `.venv` are validated independently.",
             )
         )
-        self._update_ready_state(rows)
+        self._update_ready_state(diagnosis)
         self.status_table.setRowCount(len(rows))
-        for i, (item, (ok, detail)) in enumerate(rows.items()):
-            self.status_table.setItem(i, 0, QTableWidgetItem(item))
-            self.status_table.setItem(i, 1, QTableWidgetItem(pick(self.lang, "OK", "OK") if ok else pick(self.lang, "FALTA", "MISSING")))
-            self.status_table.setItem(i, 2, QTableWidgetItem(detail))
+        for i, row in enumerate(rows):
+            self.status_table.setItem(i, 0, QTableWidgetItem(row.item))
+            self.status_table.setItem(i, 1, QTableWidgetItem(row.status))
+            self.status_table.setItem(i, 2, QTableWidgetItem(row.detail))
         self.status_table.resizeColumnsToContents()
 
     def refresh_detection(self) -> None:
         lines = self.setup_mgr.summarize_detection(self.settings)
+        diagnosis = self.validator.diagnose(self.settings, lang=self.lang)
         translated: list[str] = []
         for line in lines:
             if line == "Detected tools:":
@@ -434,6 +436,10 @@ class SetupTab(QWidget):
                 )
             else:
                 translated.append(line)
+        if diagnosis.recommendations:
+            translated.append("")
+            translated.append(pick(self.lang, "Recomendaciones:", "Recommendations:"))
+            translated.extend(f"- {item}" for item in diagnosis.recommendations)
         self.detected_label.setText("\n".join(translated))
 
     def apply_detected_defaults(self) -> None:
@@ -453,8 +459,8 @@ class SetupTab(QWidget):
         self.log.append(
             pick(
                 self.lang,
-                "Lanzando bootstrap de Ubuntu con privilegios. Se abrirá la autenticación del sistema si pkexec está disponible.\n",
-                "Launching Ubuntu bootstrap with privileges. System authentication will appear if pkexec is available.\n",
+                "Lanzando bootstrap de Ubuntu con privilegios. Este paso solo instala paquetes del sistema; `.venv` debe prepararse después como usuario normal.\n",
+                "Launching Ubuntu bootstrap with privileges. This step only installs system packages; `.venv` must be prepared afterwards as the normal user.\n",
             )
         )
         self.send_status.emit(pick(self.lang, "Instalación en progreso", "Installation in progress"))
@@ -466,8 +472,8 @@ class SetupTab(QWidget):
             self.log.append(
                 pick(
                     self.lang,
-                    "\nInstalación o validación completada. Aplicando rutas detectadas automáticamente.\n",
-                    "\nInstallation or validation completed. Applying detected paths automatically.\n",
+                    "\nInstalación o validación completada. Aplicando rutas detectadas automáticamente y refrescando el diagnóstico.\n",
+                    "\nInstallation or validation completed. Applying detected paths automatically and refreshing diagnostics.\n",
                 )
             )
             self.send_status.emit(pick(self.lang, "Setup listo", "Setup ready"))
@@ -478,8 +484,8 @@ class SetupTab(QWidget):
             self.log.append(
                 pick(
                     self.lang,
-                    f"\nEl proceso terminó con error (exit={code}, status={status}). Revisa el log.\n",
-                    f"\nThe process ended with an error (exit={code}, status={status}). Review the log.\n",
+                    f"\nEl proceso terminó con error (exit={code}, status={status}). Revisa el log; si falló `pkexec` o `apt`, el `.venv` no fue tocado.\n",
+                    f"\nThe process ended with an error (exit={code}, status={status}). Review the log; if `pkexec` or `apt` failed, `.venv` was not modified.\n",
                 )
             )
             self.send_status.emit(pick(self.lang, "Setup falló", "Setup failed"))
@@ -527,35 +533,49 @@ class SetupTab(QWidget):
                 )
             )
 
-    def _update_ready_state(self, rows: dict[str, tuple[bool, str]]) -> None:
-        tool_items = [ok for key, (ok, _) in rows.items() if key.startswith("tool:")]
-        pdk_items = [ok for key, (ok, _) in rows.items() if key.startswith("pdk:")]
-        python_items = [ok for key, (ok, _) in rows.items() if key.startswith("python:")]
+    def _update_ready_state(self, diagnosis) -> None:
+        tools_ready = all(tool.status in {"ok", "alias"} for tool in diagnosis.tools.values())
+        pdk_ready = diagnosis.pdk.status == "present"
+        python_ready = not diagnosis.python_env.problems and diagnosis.python_env.requirements_ok
 
-        def summary(values: list[bool]) -> str:
-            if not values:
-                return "—"
-            if all(values):
+        def summary(ready: bool, partial: bool = False) -> str:
+            if ready:
                 return pick(self.lang, "Listo", "Ready")
-            if any(values):
+            if partial:
                 return pick(self.lang, "Parcial", "Partial")
             return pick(self.lang, "Pendiente", "Pending")
 
-        self.card_tools_value.setText(summary(tool_items))
-        self.card_pdk_value.setText(summary(pdk_items))
-        self.card_python_value.setText(summary(python_items))
-        overall_ready = all(ok for ok, _ in rows.values()) if rows else False
-        self.card_overall_value.setText(pick(self.lang, "Listo", "Ready") if overall_ready else pick(self.lang, "Pendiente", "Pending"))
+        self.card_tools_value.setText(summary(tools_ready, partial=any(tool.status in {"ok", "alias"} for tool in diagnosis.tools.values())))
+        self.card_pdk_value.setText(
+            pick(self.lang, "Listo", "Ready")
+            if pdk_ready
+            else pick(self.lang, "Incompleto", "Incomplete")
+            if diagnosis.pdk.found
+            else pick(self.lang, "Ausente", "Absent")
+        )
+        self.card_python_value.setText(summary(python_ready, partial=diagnosis.python_env.venv_exists))
+        overall_ready = diagnosis.overall_status == "ok"
+        self.card_overall_value.setText(
+            pick(self.lang, "Listo", "Ready")
+            if overall_ready
+            else pick(self.lang, "Atención", "Attention")
+            if diagnosis.overall_status == "warning"
+            else pick(self.lang, "Pendiente", "Pending")
+        )
         self.ready_badge.setText(pick(self.lang, "ENVIRONMENT READY", "ENVIRONMENT READY") if overall_ready else pick(self.lang, "SETUP IN PROGRESS", "SETUP IN PROGRESS"))
         self.ready_title.setText(
             pick(self.lang, "Tu entorno está listo", "Your environment is ready")
             if overall_ready
-            else pick(self.lang, "Aún faltan algunos pasos", "A few steps are still pending")
+            else pick(self.lang, "Aún faltan algunos pasos críticos", "A few critical steps are still pending")
         )
         self.ready_text.setText(
             pick(
                 self.lang,
-                "Puedes volver a Simulation, Extraction o LVS con confianza." if overall_ready else "Vuelve a los pasos anteriores o corrige rutas en Preferences para cerrar la instalación.",
-                "You can go back to Simulation, Extraction, or LVS with confidence." if overall_ready else "Go back to the previous steps or adjust paths in Preferences to finish the setup.",
+                "Puedes volver a Simulation, Extraction o LVS con confianza."
+                if overall_ready
+                else "La app no marcará el entorno como listo mientras falte el PDK, exista un `.venv` roto o falten permisos de escritura.",
+                "You can go back to Simulation, Extraction, or LVS with confidence."
+                if overall_ready
+                else "The app will not report the environment as ready while the PDK is missing, `.venv` is broken, or write permissions are insufficient.",
             )
         )

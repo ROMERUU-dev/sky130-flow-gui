@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QSplashScreen
+
+from app.core.branding import resolve_branding_logo
 
 
 SPLASH_PRIMARY = QColor("#0a5c2a")
@@ -17,7 +17,6 @@ SPLASH_ACCENT = QColor("#9cf5b4")
 SPLASH_TEXT = QColor("#f4fff7")
 SPLASH_MUTED = QColor("#d3ebd9")
 SPLASH_PROGRESS = QColor("#e9fff0")
-LOGO_PATH = Path("/home/romeruu/Descargas/ardilla_silueta_blanca_suave.svg")
 
 
 def _draw_fallback_logo(painter: QPainter, x: int, y: int, scale: float = 1.0) -> None:
@@ -53,19 +52,39 @@ def _draw_fallback_logo(painter: QPainter, x: int, y: int, scale: float = 1.0) -
 
 
 def _draw_logo(painter: QPainter, rect: QRectF) -> None:
-    """Draw the app SVG logo, falling back to a simple vector mark."""
+    """Draw the packaged logo asset, falling back to a simple vector mark."""
     clip_path = QPainterPath()
     clip_path.addRoundedRect(rect, 26, 26)
     painter.save()
     painter.setClipPath(clip_path)
 
-    renderer = QSvgRenderer(str(LOGO_PATH))
-    if renderer.isValid():
-        renderer.render(painter, rect)
-        painter.restore()
-        return
+    asset_kind, asset_path = resolve_branding_logo()
+    if asset_kind == "png" and asset_path is not None:
+        pixmap = QPixmap(str(asset_path))
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                int(rect.width()),
+                int(rect.height()),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+            x = rect.x() + (rect.width() - scaled.width()) / 2
+            y = rect.y() + (rect.height() - scaled.height()) / 2
+            painter.drawPixmap(int(x), int(y), scaled)
+            painter.restore()
+            return
+
+    if asset_kind == "svg" and asset_path is not None:
+        renderer = QSvgRenderer(str(asset_path))
+        if renderer.isValid():
+            renderer.render(painter, rect)
+            painter.restore()
+            return
 
     _draw_fallback_logo(painter, x=int(rect.x()), y=int(rect.y()), scale=rect.width() / 380.0)
+    painter.setPen(QColor("#dcfce7"))
+    painter.setFont(QFont("DejaVu Sans", 10, QFont.Bold))
+    painter.drawText(rect.adjusted(0, rect.height() - 24, 0, 0), Qt.AlignHCenter, "Logo fallback")
     painter.restore()
 
 

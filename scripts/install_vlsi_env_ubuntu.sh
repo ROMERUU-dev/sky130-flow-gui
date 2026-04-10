@@ -27,32 +27,32 @@ apt-get install -y \
   klayout \
   python3 \
   python3-pip \
-  python3-venv
+  python3-venv \
+  libxcb-cursor0 \
+  libxcb-xinerama0 \
+  libxkbcommon-x11-0 \
+  libxcb-xkb1 \
+  libxcb-icccm4 \
+  libxcb-image0 \
+  libxcb-keysyms1 \
+  libxcb-render-util0 \
+  libxcb-randr0 \
+  libxcb-shape0 \
+  libxcb-xfixes0 \
+  libgl1
 
 echo
 echo "Package installation finished."
 echo
-echo "Preparing Python environment for this project..."
-
-ORIG_USER="${SUDO_USER:-}"
-if [ -z "$ORIG_USER" ] && [ -n "${PKEXEC_UID:-}" ]; then
-  ORIG_USER="$(id -nu "$PKEXEC_UID")"
-fi
-
-if [ -n "$ORIG_USER" ] && [ "$ORIG_USER" != "root" ]; then
-  runuser -u "$ORIG_USER" -- bash -lc "
-    set -euo pipefail
-    cd '$REPO_ROOT'
-    python3 -m venv .venv
-    .venv/bin/python -m pip install --upgrade pip
-    .venv/bin/python -m pip install -r requirements.txt
-  "
-  echo "Python environment ready at: $REPO_ROOT/.venv"
-else
-  echo "Could not determine the original desktop user."
-  echo "Create the project venv manually with:"
-  echo "  cd '$REPO_ROOT' && python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt"
-fi
+echo "System bootstrap completed."
+echo "This script intentionally does NOT create or modify $REPO_ROOT/.venv."
+echo "Create the Python environment later as the normal user, for example:"
+echo "  cd '$REPO_ROOT'"
+echo "  python3 -m venv .venv"
+echo "  .venv/bin/python -m pip install --upgrade pip"
+echo "  .venv/bin/python -m pip install -r requirements.txt"
+echo
+echo "Do not mix pkexec/sudo with user-owned .venv creation inside the repository."
 
 echo
 echo "Checking for common SKY130A locations..."
@@ -73,8 +73,8 @@ if [ -n "$found_pdk" ]; then
   echo "Detected SKY130A at: $found_pdk"
 else
   echo "SKY130A was not found in common locations."
-  echo "You can still use the app now, then point Preferences/Setup to an existing PDK,"
-  echo "or install a SKY130A distribution separately and re-run detection."
+  echo "Installing apt packages is not the same as having the SKY130 PDK."
+  echo "Point Preferences/Setup to an existing SKY130A tree or install one separately and re-run detection."
 fi
 
 echo
