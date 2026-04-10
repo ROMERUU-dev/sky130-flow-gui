@@ -11,6 +11,10 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from app.core.dependency_manifest import DependencyManifest
 from app.core.env_validator import REQUIRED_PDK_SUBDIRS
 
