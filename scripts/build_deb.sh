@@ -8,8 +8,28 @@ BUILD_ROOT="$DIST_DIR/deb-build"
 
 PKG_NAME="sky130-flow-gui"
 VERSION="${1:-0.1.0}"
-ARCH="${2:-all}"
+ARCH="${2:-$(dpkg --print-architecture)}"
 PKG_DIR="$BUILD_ROOT/${PKG_NAME}_${VERSION}_${ARCH}"
+PACKAGE_VENV="$PKG_DIR/opt/$PKG_NAME/.venv"
+SOURCE_VENV="$REPO_ROOT/.venv"
+
+REQUIRED_GUI_PACKAGES=(
+  libxcb-cursor0
+  libxkbcommon-x11-0
+  libxcb-xkb1
+  libxcb-xfixes0
+  libgl1
+)
+
+RECOMMENDED_GUI_PACKAGES=(
+  libxcb-xinerama0
+  libxcb-icccm4
+  libxcb-image0
+  libxcb-keysyms1
+  libxcb-render-util0
+  libxcb-randr0
+  libxcb-shape0
+)
 
 rm -rf "$PKG_DIR"
 mkdir -p \
@@ -27,6 +47,14 @@ cp -R \
 
 cp -R "$REPO_ROOT/scripts" "$PKG_DIR/opt/$PKG_NAME/"
 
+if [ -x "$SOURCE_VENV/bin/python" ]; then
+  cp -a "$SOURCE_VENV" "$PACKAGE_VENV"
+else
+  python3 -m venv "$PACKAGE_VENV"
+  "$PACKAGE_VENV/bin/python" -m pip install --upgrade pip
+  "$PACKAGE_VENV/bin/python" -m pip install -r "$REPO_ROOT/requirements.txt"
+fi
+
 find "$PKG_DIR/opt/$PKG_NAME" -type d -name "__pycache__" -prune -exec rm -rf {} +
 find "$PKG_DIR/opt/$PKG_NAME" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
 
@@ -35,12 +63,26 @@ cat > "$PKG_DIR/usr/bin/$PKG_NAME" <<'EOF'
 set -euo pipefail
 
 APP_ROOT="/opt/sky130-flow-gui"
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/sky130-flow-gui"
+LOG_FILE="$LOG_DIR/launcher.log"
+
+mkdir -p "$LOG_DIR"
+exec >>"$LOG_FILE" 2>&1
+
+echo
+echo "[$(date -Is)] launching sky130-flow-gui"
+
 cd "$APP_ROOT"
 
 if [ -x "$APP_ROOT/.venv/bin/python" ]; then
   exec "$APP_ROOT/.venv/bin/python" -m app.main "$@"
 fi
 
+if python3 -c "import PySide6, pyqtgraph" >/dev/null 2>&1; then
+  exec python3 -m app.main "$@"
+fi
+
+echo "Missing packaged or system Python dependencies for SKY130 Flow GUI."
 exec python3 -m app.main "$@"
 EOF
 chmod 755 "$PKG_DIR/usr/bin/$PKG_NAME"
@@ -52,6 +94,17 @@ cp "$REPO_ROOT/app/resources/sky130-flow-gui.svg" \
 
 INSTALLED_SIZE="$(du -sk "$PKG_DIR" | awk '{print $1}')"
 
+REQUIRED_DEPENDS="python3"
+for pkg in "${REQUIRED_GUI_PACKAGES[@]}"; do
+  REQUIRED_DEPENDS+=", ${pkg}"
+done
+
+RECOMMENDS_FIELD=""
+if [ "${#RECOMMENDED_GUI_PACKAGES[@]}" -gt 0 ]; then
+  RECOMMENDS_JOINED="$(IFS=, ; echo "${RECOMMENDED_GUI_PACKAGES[*]}")"
+  RECOMMENDS_FIELD="Recommends: ${RECOMMENDS_JOINED}"
+fi
+
 cat > "$PKG_DIR/DEBIAN/control" <<EOF
 Package: $PKG_NAME
 Version: $VERSION
@@ -59,7 +112,8 @@ Section: electronics
 Priority: optional
 Architecture: $ARCH
 Maintainer: ROMERUU-dev
-Depends: python3, python3-venv, python3-pip
+Depends: $REQUIRED_DEPENDS
+$RECOMMENDS_FIELD
 Installed-Size: $INSTALLED_SIZE
 Description: SKY130 workflow manager with setup assistant
  A desktop app for coordinating simulation, extraction, LVS,
@@ -75,14 +129,11 @@ APP_ROOT="/opt/sky130-flow-gui"
 cat <<MSG
 SKY130 Flow GUI was installed under $APP_ROOT.
 
-This package intentionally does not create $APP_ROOT/.venv during post-install.
-Prepare the Python environment later as the normal desktop user if needed:
-  cd "$APP_ROOT"
-  python3 -m venv .venv
-  .venv/bin/python -m pip install --upgrade pip
-  .venv/bin/python -m pip install -r requirements.txt
+This package includes its own Python runtime under:
+  $APP_ROOT/.venv
 
-Do not create or repair .venv under /opt with sudo/pkexec.
+If the desktop launcher fails, check:
+  ~/.local/state/sky130-flow-gui/launcher.log
 MSG
 
 update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
