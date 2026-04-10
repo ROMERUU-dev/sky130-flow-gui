@@ -115,6 +115,16 @@ class PreferencesTab(QWidget):
         self._add_path_row(form, "pdk.klayout_antenna_deck", "KLayout antenna deck", pdk["klayout_antenna_deck"])
 
         general_layout.addLayout(form)
+        pdk_usage_note = QLabel(
+            pick(
+                self.lang,
+                "Uso real de estas rutas PDK: PDK_ROOT y SKY130A se usan para detección y contexto general; Magic rcfile lo usan Extracción y Magic; Netgen setup lo usa LVS; KLayout antenna deck lo usa Antena.",
+                "Actual use of these PDK paths: PDK_ROOT and SKY130A are used for detection and general context; Magic rcfile is used by Extraction and Magic; Netgen setup is used by LVS; KLayout antenna deck is used by Antenna.",
+            )
+        )
+        pdk_usage_note.setWordWrap(True)
+        pdk_usage_note.setStyleSheet("color: #667085;")
+        general_layout.addWidget(pdk_usage_note)
 
         btns = QHBoxLayout()
         save = QPushButton(pick(self.lang, "Guardar preferencias", "Save Preferences"))

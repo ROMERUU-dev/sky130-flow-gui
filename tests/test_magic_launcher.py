@@ -41,6 +41,25 @@ class MagicLaunchBuilderTest(unittest.TestCase):
         self.assertEqual(spec.cwd, str(layout_dir.resolve()))
         self.assertEqual(spec.env["PDK_ROOT"], str(sky130a.parent))
         self.assertEqual(spec.env["SKY130A"], str(sky130a))
+        self.assertEqual(spec.env["MAGTYPE"], "mag")
+
+    def test_build_derives_magicrc_from_sky130a_when_not_explicitly_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sky130a = Path(tmpdir) / "pdk" / "sky130A"
+            magic_dir = sky130a / "libs.tech" / "magic"
+            magic_dir.mkdir(parents=True)
+            magic_rc = magic_dir / "sky130A.magicrc"
+            magic_rc.write_text("# magicrc\n", encoding="utf-8")
+
+            settings = AppSettings()
+            settings.tool_paths.magic = "magic"
+            settings.pdk_paths.sky130a = str(sky130a)
+
+            with mock.patch.dict(os.environ, {}, clear=True):
+                spec = MagicLaunchBuilder(settings).build()
+
+        self.assertEqual(spec.command, ["magic", "-rcfile", str(magic_rc.resolve())])
+        self.assertEqual(spec.cwd, str(magic_dir.resolve()))
 
     def test_build_opens_mag_file_by_cell_name_in_parent_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -51,7 +70,10 @@ class MagicLaunchBuilderTest(unittest.TestCase):
             settings = AppSettings()
             settings.tool_paths.magic = "magic"
 
-            with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.dict(os.environ, {}, clear=True), mock.patch(
+                "app.core.magic_launcher.EnvValidator._find_sky130a",
+                return_value=None,
+            ):
                 spec = MagicLaunchBuilder(settings).build(str(mag_path))
 
         self.assertEqual(spec.command, ["magic", "tt_um_demo"])

@@ -677,18 +677,20 @@ class SetupTab(QWidget):
             pick(
                 self.lang,
                 f"Bundle: {summary.bundle_name}\n"
-                f"Versión: {summary.bundle_version or 'pendiente'}\n"
-                f"Instalación TT: {summary.target_sky130a}\n"
+                f"Versión: {summary.bundle_version or 'no publicado'}\n"
+                f"Instalación canónica: {summary.target_sky130a}\n"
                 f"Cache: {summary.cache_root}\n"
                 f"Espacio libre: {summary.free_bytes / (1024 ** 3):.1f} GB\n"
                 f"Asset configurado: {'sí' if bool(summary.asset_url and summary.asset_filename) else 'no'}\n"
+                f"Publicado por la app: {'sí' if summary.enabled else 'no'}\n"
                 f"Listo para instalar: {'sí' if summary.ready else 'no'}",
                 f"Bundle: {summary.bundle_name}\n"
-                f"Version: {summary.bundle_version or 'pending'}\n"
-                f"TT install: {summary.target_sky130a}\n"
+                f"Version: {summary.bundle_version or 'not published'}\n"
+                f"Canonical install: {summary.target_sky130a}\n"
                 f"Cache: {summary.cache_root}\n"
                 f"Free space: {summary.free_bytes / (1024 ** 3):.1f} GB\n"
                 f"Asset configured: {'yes' if bool(summary.asset_url and summary.asset_filename) else 'no'}\n"
+                f"Published by the app: {'yes' if summary.enabled else 'no'}\n"
                 f"Ready to install: {'yes' if summary.ready else 'no'}",
             )
         )

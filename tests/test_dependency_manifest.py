@@ -23,9 +23,9 @@ class DependencyManifestTest(unittest.TestCase):
         self.assertEqual(channel.pdk_managed_root, "~/pdk")
         self.assertEqual(channel.pdk_bundle_install_root, "~/pdk")
         self.assertEqual(channel.pdk_bundle_name, "tt-pdk-sky130a")
-        self.assertTrue(channel.pdk_bundle_enabled)
-        self.assertEqual(channel.pdk_bundle_version, "0.2.0-beta.4")
-        self.assertTrue(channel.pdk_bundle_asset_url.endswith("tt-pdk-sky130a_0.2.0-beta.4.tar.gz"))
+        self.assertFalse(channel.pdk_bundle_enabled)
+        self.assertEqual(channel.pdk_bundle_version, "")
+        self.assertEqual(channel.pdk_bundle_asset_url, "")
 
     def test_unknown_channel_raises(self) -> None:
         manifest = DependencyManifest()
