@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtGui import QColor
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -17,21 +16,24 @@ from PySide6.QtWidgets import (
     QStatusBar,
     QTabWidget,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from app.core.i18n import pick
+from app.core.layout_tools import resolve_layout_dir
+from app.core.magic_launcher import MagicLaunchBuilder
 from app.core.output_manager import OutputManager
 from app.core.project_manager import ProjectManager
 from app.core.settings_manager import AppSettings, SettingsManager
+from app.core.xschem_launcher import XschemLaunchBuilder
 from app.ui.antenna_tab import AntennaTab
 from app.ui.em_sizing_tab import EmSizingTab
 from app.ui.extraction_tab import ExtractionTab
 from app.ui.lvs_tab import LvsTab
 from app.ui.preferences_tab import PreferencesTab
 from app.ui.project_tab import ProjectTab
-from app.ui.setup_tab import SetupTab
 from app.ui.simulation_tab import SimulationTab
 
 
@@ -92,14 +94,12 @@ class MainWindow(QMainWindow):
         self.ext_tab = ExtractionTab(self.app_settings, self.project_mgr.outputs)
         self.ant_tab = AntennaTab(self.app_settings, self.project_mgr.outputs)
         self.em_tab = EmSizingTab(self.app_settings, self.project_mgr.outputs)
-        self.setup_tab = SetupTab(self.app_settings)
         self.pref_tab = PreferencesTab(self.app_settings)
 
         self.ext_tab.netlist_ready.connect(self._receive_extracted_netlist)
         self.pref_tab.settings_updated.connect(self._on_settings_updated)
-        self.setup_tab.settings_updated.connect(self._on_settings_updated)
 
-        for tab in [self.sim_tab, self.lvs_tab, self.ext_tab, self.ant_tab, self.em_tab, self.setup_tab]:
+        for tab in [self.sim_tab, self.lvs_tab, self.ext_tab, self.ant_tab, self.em_tab, self.pref_tab]:
             tab.send_status.connect(self.set_status)
 
         self.tabs.addTab(self.sim_tab, pick(self.app_settings.language, "∿ Simulación", "∿ Simulation"))
@@ -107,7 +107,6 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.ext_tab, pick(self.app_settings.language, "◫ Extracción", "◫ Extraction"))
         self.tabs.addTab(self.ant_tab, pick(self.app_settings.language, "⌁ Antena", "⌁ Antenna"))
         self.tabs.addTab(self.em_tab, "≈ EM")
-        self.tabs.addTab(self.setup_tab, pick(self.app_settings.language, "⬢ Entorno", "⬢ Setup"))
         self.tabs.addTab(self.project_tab, pick(self.app_settings.language, "⌂ Proyecto", "⌂ Project"))
         self.tabs.addTab(self.pref_tab, pick(self.app_settings.language, "⚙ Preferencias", "⚙ Preferences"))
         self._populate_sidebar()
@@ -118,6 +117,8 @@ class MainWindow(QMainWindow):
             self.project_mgr.ensure_structure()
 
     def _build_toolbar(self) -> None:
+        import subprocess
+
         toolbar = QToolBar(pick(self.app_settings.language, "Quick Actions", "Quick Actions"), self)
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
@@ -125,9 +126,21 @@ class MainWindow(QMainWindow):
         toolbar.setIconSize(toolbar.iconSize())
         self.addToolBar(toolbar)
 
-        open_xschem = QAction(pick(self.app_settings.language, "◫ Abrir xschem", "◫ Open xschem"), self)
-        open_xschem.triggered.connect(self._open_xschem)
-        toolbar.addAction(open_xschem)
+        self._toolbar_subprocess = subprocess
+
+        xschem_button = QToolButton(self)
+        xschem_button.setObjectName("toolbarXschemButton")
+        xschem_button.setText(pick(self.app_settings.language, "◫ xschem", "◫ xschem"))
+        xschem_button.setToolTip(pick(self.app_settings.language, "Abrir xschem", "Open xschem"))
+        xschem_button.clicked.connect(self._open_xschem)
+        toolbar.addWidget(xschem_button)
+
+        magic_button = QToolButton(self)
+        magic_button.setObjectName("toolbarMagicButton")
+        magic_button.setText(pick(self.app_settings.language, "⬢ Magic", "⬢ Magic"))
+        magic_button.setToolTip(pick(self.app_settings.language, "Abrir Magic", "Open Magic"))
+        magic_button.clicked.connect(self._open_magic)
+        toolbar.addWidget(magic_button)
 
     def _apply_window_style(self) -> None:
         self.tabs.setDocumentMode(True)
@@ -159,6 +172,13 @@ class MainWindow(QMainWindow):
             QToolBar#mainToolbar QToolButton:hover {
                 background: #eef5ff;
                 border: 1px solid #cfe0ff;
+            }
+            QToolBar#mainToolbar QToolButton#toolbarMagicButton {
+                color: #7c3aed;
+            }
+            QToolBar#mainToolbar QToolButton#toolbarMagicButton:hover {
+                background: #f6f0ff;
+                border: 1px solid #e2d4ff;
             }
             QFrame#sidebarCard {
                 background: #ffffff;
@@ -312,18 +332,29 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self.sidebar.setCurrentRow)
 
     def _open_xschem(self) -> None:
-        import subprocess
-
-        cmd = [self.app_settings.tool_paths.xschem]
-        if self._current_project:
-            cmd.append(self._current_project)
+        launch = XschemLaunchBuilder(self.app_settings).build(self._current_project)
         try:
-            subprocess.Popen(cmd)
+            self._toolbar_subprocess.Popen(launch.command, cwd=launch.cwd, env=launch.env)
         except OSError as exc:
             QMessageBox.warning(
                 self,
                 pick(self.app_settings.language, "Error al abrir", "Launch error"),
                 f"{pick(self.app_settings.language, 'No se pudo abrir xschem', 'Failed to launch xschem')}: {exc}",
+            )
+
+    def _open_magic(self) -> None:
+        project_path = Path(self._current_project).expanduser() if self._current_project else None
+        target_path = None
+        if project_path is not None and project_path.exists():
+            target_path = str(resolve_layout_dir(project_path.resolve()))
+        launch = MagicLaunchBuilder(self.app_settings).build(target_path)
+        try:
+            self._toolbar_subprocess.Popen(launch.command, cwd=launch.cwd, env=launch.env)
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                pick(self.app_settings.language, "Error al abrir", "Launch error"),
+                f"{pick(self.app_settings.language, 'No se pudo abrir Magic', 'Failed to launch Magic')}: {exc}",
             )
 
     def _on_project_changed(self, path: str) -> None:

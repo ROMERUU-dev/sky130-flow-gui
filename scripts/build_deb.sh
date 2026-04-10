@@ -25,9 +25,7 @@ cp -R \
   "$REPO_ROOT/README.md" \
   "$PKG_DIR/opt/$PKG_NAME/"
 
-mkdir -p "$PKG_DIR/opt/$PKG_NAME/scripts"
-cp "$REPO_ROOT/scripts/install_vlsi_env_ubuntu.sh" \
-  "$PKG_DIR/opt/$PKG_NAME/scripts/install_vlsi_env_ubuntu.sh"
+cp -R "$REPO_ROOT/scripts" "$PKG_DIR/opt/$PKG_NAME/"
 
 find "$PKG_DIR/opt/$PKG_NAME" -type d -name "__pycache__" -prune -exec rm -rf {} +
 find "$PKG_DIR/opt/$PKG_NAME" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete

@@ -2,10 +2,70 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import os
 from pathlib import Path
+import shutil
 
-from app.core.env_validator import EnvValidator
+from app.core.dependency_manifest import DependencyManifest
+from app.core.env_validator import EnvValidator, REQUIRED_PDK_SUBDIRS
 from app.core.settings_manager import AppSettings
+
+
+@dataclass(frozen=True)
+class PdkCandidate:
+    """Reusable SKY130A candidate discovered on disk."""
+
+    sky130a_path: str
+    root_path: str
+    status: str
+    source: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class PdkInstallPreflight:
+    """Precheck summary for managed PDK installation."""
+
+    target_root: str
+    target_sky130a: str
+    install_mode: str
+    minimum_free_bytes: int
+    free_bytes: int
+    enough_space: bool
+    existing_status: str
+    selected_candidate: str
+    selected_candidate_status: str
+    message: str
+
+
+@dataclass(frozen=True)
+class PdkInstallResult:
+    """Outcome of a managed PDK installation attempt."""
+
+    ok: bool
+    changed: bool
+    target_sky130a: str
+    source_sky130a: str
+    message: str
+
+
+@dataclass(frozen=True)
+class PdkSourceBuildPreflight:
+    """Precheck summary for building the PDK from sources."""
+
+    build_root: str
+    target_sky130a: str
+    minimum_free_bytes: int
+    free_bytes: int
+    enough_space: bool
+    target_available: bool
+    missing_commands: tuple[str, ...]
+    has_required_commands: bool
+    has_pinned_source: bool
+    reusable_candidate_available: bool
+    ready: bool
+    message: str
 
 
 class SetupManager:
@@ -13,13 +73,26 @@ class SetupManager:
 
     def __init__(self) -> None:
         self.repo_root = Path(__file__).resolve().parents[2]
+        self.manifest = DependencyManifest()
         self.validator = EnvValidator()
 
     def installer_script(self) -> Path:
         return self.repo_root / "scripts" / "install_vlsi_env_ubuntu.sh"
 
+    def pdk_source_build_script(self) -> Path:
+        return self.repo_root / "scripts" / "build_sky130_pdk_from_sources.sh"
+
     def installer_command(self) -> list[str]:
-        return ["pkexec", "/bin/bash", str(self.installer_script())]
+        return ["pkexec", "/bin/bash", str(self.installer_script()), self.manifest.default_channel()]
+
+    def pdk_source_build_command(self) -> list[str]:
+        return ["/bin/bash", str(self.pdk_source_build_script()), self.manifest.default_channel()]
+
+    def bootstrap_packages(self, channel: str | None = None) -> tuple[str, ...]:
+        return self.manifest.channel(channel).apt_packages
+
+    def supported_channels(self) -> tuple[str, ...]:
+        return self.manifest.channel_names()
 
     def detect_tool_defaults(self) -> dict[str, str]:
         detected: dict[str, str] = {}
@@ -35,6 +108,209 @@ class SetupManager:
         if pdk.found and pdk.sky130a_path:
             detected.update(self._build_pdk_mapping(Path(pdk.sky130a_path)))
         return detected
+
+    def detect_reusable_pdk_candidates(self) -> list[PdkCandidate]:
+        roots = self._candidate_pdk_roots()
+        seen: set[Path] = set()
+        candidates: list[PdkCandidate] = []
+
+        for root, source in roots:
+            if not root.exists():
+                continue
+            if root.name == "sky130A" and root.is_dir():
+                sky130a_paths = [root]
+            else:
+                sky130a_paths = self._find_all_sky130a_under(root)
+
+            for sky130a in sky130a_paths:
+                resolved = sky130a.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                missing = [relative for relative in REQUIRED_PDK_SUBDIRS.values() if not resolved.joinpath(relative).exists()]
+                status = "present" if not missing else "incomplete"
+                detail = (
+                    "ready to adopt"
+                    if status == "present"
+                    else f"missing: {', '.join(missing)}"
+                )
+                candidates.append(
+                    PdkCandidate(
+                        sky130a_path=str(resolved),
+                        root_path=str(resolved.parent),
+                        status=status,
+                        source=source,
+                        detail=detail,
+                    )
+                )
+
+        candidates.sort(key=lambda item: (0 if item.status == "present" else 1, item.sky130a_path))
+        return candidates
+
+    def apply_pdk_candidate(self, settings: AppSettings, sky130a_path: str) -> bool:
+        candidate_path = Path(sky130a_path).expanduser().resolve()
+        if not candidate_path.exists():
+            return False
+        mapping = self._build_pdk_mapping(candidate_path)
+        changed = False
+        for key, value in mapping.items():
+            if getattr(settings.pdk_paths, key) != value:
+                setattr(settings.pdk_paths, key, value)
+                changed = True
+        return changed
+
+    def pdk_install_preflight(self, settings: AppSettings) -> PdkInstallPreflight:
+        policy = self.manifest.channel()
+        target_root = Path(policy.pdk_managed_root).expanduser()
+        target_sky130a = target_root / "sky130A"
+        usage_root = target_root if target_root.exists() else target_root.parent if target_root.parent.exists() else Path.home()
+        free_bytes = shutil.disk_usage(usage_root).free
+        minimum_free_bytes = policy.pdk_minimum_free_gb * 1024 * 1024 * 1024
+        enough_space = free_bytes >= minimum_free_bytes
+        existing_status = self._classify_sky130a_path(target_sky130a)
+
+        selected_candidate = ""
+        selected_candidate_status = "missing"
+        for candidate in self.detect_reusable_pdk_candidates():
+            if Path(candidate.sky130a_path).resolve() == target_sky130a.resolve():
+                continue
+            if candidate.status == "present":
+                selected_candidate = candidate.sky130a_path
+                selected_candidate_status = candidate.status
+                break
+
+        message_parts = [
+            f"target={target_sky130a}",
+            f"mode={policy.pdk_managed_install_mode}",
+            f"free_gb={free_bytes / (1024 ** 3):.1f}",
+        ]
+        if not enough_space:
+            message_parts.append(f"requires_at_least={policy.pdk_minimum_free_gb}GB")
+        if existing_status != "missing":
+            message_parts.append(f"existing={existing_status}")
+        if selected_candidate:
+            message_parts.append(f"candidate={selected_candidate}")
+
+        return PdkInstallPreflight(
+            target_root=str(target_root),
+            target_sky130a=str(target_sky130a),
+            install_mode=policy.pdk_managed_install_mode,
+            minimum_free_bytes=minimum_free_bytes,
+            free_bytes=free_bytes,
+            enough_space=enough_space,
+            existing_status=existing_status,
+            selected_candidate=selected_candidate,
+            selected_candidate_status=selected_candidate_status,
+            message="; ".join(message_parts),
+        )
+
+    def install_managed_pdk(self, settings: AppSettings, source_sky130a: str | None = None) -> PdkInstallResult:
+        preflight = self.pdk_install_preflight(settings)
+        target_path = Path(preflight.target_sky130a).expanduser()
+        source_path = Path(source_sky130a or preflight.selected_candidate).expanduser() if (source_sky130a or preflight.selected_candidate) else None
+
+        if not preflight.enough_space:
+            return PdkInstallResult(
+                ok=False,
+                changed=False,
+                target_sky130a=str(target_path),
+                source_sky130a=str(source_path or ""),
+                message=f"Not enough free space for managed PDK target at {target_path}.",
+            )
+        if source_path is None or not source_path.exists():
+            return PdkInstallResult(
+                ok=False,
+                changed=False,
+                target_sky130a=str(target_path),
+                source_sky130a=str(source_path or ""),
+                message="No reusable PDK candidate is available to install.",
+            )
+        if preflight.install_mode != "symlink":
+            return PdkInstallResult(
+                ok=False,
+                changed=False,
+                target_sky130a=str(target_path),
+                source_sky130a=str(source_path),
+                message=f"Unsupported managed PDK install mode: {preflight.install_mode}",
+            )
+
+        if os.path.lexists(target_path):
+            try:
+                if target_path.resolve() == source_path.resolve():
+                    self.apply_pdk_candidate(settings, str(target_path))
+                    return PdkInstallResult(
+                        ok=True,
+                        changed=False,
+                        target_sky130a=str(target_path),
+                        source_sky130a=str(source_path),
+                        message="Managed PDK target already points to the selected candidate.",
+                    )
+            except OSError:
+                pass
+            return PdkInstallResult(
+                ok=False,
+                changed=False,
+                target_sky130a=str(target_path),
+                source_sky130a=str(source_path),
+                message=f"Managed PDK target already exists at {target_path}.",
+            )
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.symlink_to(source_path.resolve(), target_is_directory=True)
+        self.apply_pdk_candidate(settings, str(target_path))
+        return PdkInstallResult(
+            ok=True,
+            changed=True,
+            target_sky130a=str(target_path),
+            source_sky130a=str(source_path.resolve()),
+            message=f"Managed PDK installed at {target_path} -> {source_path.resolve()}",
+        )
+
+    def pdk_source_build_preflight(self, settings: AppSettings) -> PdkSourceBuildPreflight:
+        policy = self.manifest.channel()
+        build_root = Path(policy.pdk_source_build_root).expanduser()
+        target_sky130a = Path(policy.pdk_managed_root).expanduser() / "sky130A"
+        usage_root = build_root if build_root.exists() else build_root.parent if build_root.parent.exists() else Path.home()
+        free_bytes = shutil.disk_usage(usage_root).free
+        minimum_free_bytes = policy.pdk_source_build_minimum_free_gb * 1024 * 1024 * 1024
+        enough_space = free_bytes >= minimum_free_bytes
+        target_available = not os.path.lexists(target_sky130a)
+        missing_commands = tuple(
+            command for command in policy.pdk_source_build_required_commands if shutil.which(command) is None
+        )
+        has_required_commands = not missing_commands
+        has_pinned_source = bool(policy.pdk_source_build_open_pdks_repo and policy.pdk_source_build_open_pdks_ref)
+        reusable_candidate_available = any(candidate.status == "present" for candidate in self.detect_reusable_pdk_candidates())
+        ready = enough_space and target_available and has_required_commands and has_pinned_source and not reusable_candidate_available
+        message_parts = [
+            f"build_root={build_root}",
+            f"target={target_sky130a}",
+            f"free_gb={free_bytes / (1024 ** 3):.1f}",
+        ]
+        if not enough_space:
+            message_parts.append(f"requires_at_least={policy.pdk_source_build_minimum_free_gb}GB")
+        if not target_available:
+            message_parts.append("target_already_exists")
+        if missing_commands:
+            message_parts.append(f"missing_commands={','.join(missing_commands)}")
+        if not has_pinned_source:
+            message_parts.append("missing_pinned_source")
+        if reusable_candidate_available:
+            message_parts.append("reusable_candidate_detected")
+        return PdkSourceBuildPreflight(
+            build_root=str(build_root),
+            target_sky130a=str(target_sky130a),
+            minimum_free_bytes=minimum_free_bytes,
+            free_bytes=free_bytes,
+            enough_space=enough_space,
+            target_available=target_available,
+            missing_commands=missing_commands,
+            has_required_commands=has_required_commands,
+            has_pinned_source=has_pinned_source,
+            reusable_candidate_available=reusable_candidate_available,
+            ready=ready,
+            message="; ".join(message_parts),
+        )
 
     def apply_detected_defaults(self, settings: AppSettings) -> bool:
         changed = False
@@ -110,3 +386,36 @@ class SetupManager:
         if antenna_deck.exists():
             detected["klayout_antenna_deck"] = str(antenna_deck)
         return detected
+
+    def _candidate_pdk_roots(self) -> list[tuple[Path, str]]:
+        policy = self.manifest.channel()
+        roots: list[tuple[Path, str]] = []
+        configured_roots = [
+            (Path(path).expanduser(), "manifest")
+            for path in policy.pdk_search_roots
+        ]
+        roots.extend(configured_roots)
+        for env_var in ("SKY130A", "PDK_ROOT"):
+            raw = os.environ.get(env_var, "").strip()
+            if raw:
+                roots.append((Path(raw).expanduser(), f"env:{env_var}"))
+        return roots
+
+    @staticmethod
+    def _find_all_sky130a_under(root: Path) -> list[Path]:
+        matches: list[Path] = []
+        direct = root / "sky130A"
+        if direct.is_dir():
+            matches.append(direct)
+        for pattern in ("*/sky130A", "*/*/sky130A", "**/sky130A"):
+            for match in sorted(root.glob(pattern)):
+                if match.is_dir():
+                    matches.append(match)
+        return matches
+
+    @staticmethod
+    def _classify_sky130a_path(sky130a: Path) -> str:
+        if not sky130a.exists():
+            return "missing"
+        missing = [relative for relative in REQUIRED_PDK_SUBDIRS.values() if not sky130a.joinpath(relative).exists()]
+        return "present" if not missing else "incomplete"

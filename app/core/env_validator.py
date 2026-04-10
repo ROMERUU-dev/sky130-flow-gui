@@ -11,6 +11,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.core.dependency_manifest import DependencyManifest
 from app.core.i18n import pick
 from app.core.settings_manager import AppSettings
 
@@ -28,8 +29,8 @@ TOOL_ALIASES: dict[str, tuple[str, ...]] = {
 TOOL_VERSION_ARGS: dict[str, tuple[tuple[str, ...], ...]] = {
     "xschem": (("--version",), ("-v",)),
     "ngspice": (("--version",), ("-v",)),
-    "magic": (("--version",), ("-version",)),
-    "netgen": (("--version",), ("-batch",)),
+    "magic": (("-dnull", "-noconsole", "-version"), ("-version",), ("--version",)),
+    "netgen": (("-batch", "quit"),),
     "klayout": (("-v",), ("--version",)),
     "python": (("--version",),),
     "pip": (("--version",),),
@@ -129,6 +130,7 @@ class EnvValidator:
 
     def __init__(self) -> None:
         self.repo_root = Path(__file__).resolve().parents[2]
+        self.manifest = DependencyManifest()
 
     def diagnose(self, settings: AppSettings, lang: str = "en") -> EnvironmentDiagnosis:
         tools = OrderedDict(
@@ -533,20 +535,16 @@ class EnvValidator:
         except KeyError:
             return str(uid)
 
-    @staticmethod
-    def _find_sky130a(settings: AppSettings) -> Path | None:
+    def _find_sky130a(self, settings: AppSettings) -> Path | None:
         env_pdk_root = os.environ.get("PDK_ROOT", "").strip()
         env_sky130a = os.environ.get("SKY130A", "").strip()
+        manifest_roots = [Path(root).expanduser() for root in self.manifest.channel().pdk_search_roots]
         candidates = [
             Path(settings.pdk_paths.sky130a).expanduser() if settings.pdk_paths.sky130a else None,
             Path(settings.pdk_paths.pdk_root).expanduser() if settings.pdk_paths.pdk_root else None,
             Path(env_sky130a).expanduser() if env_sky130a else None,
             Path(env_pdk_root).expanduser() if env_pdk_root else None,
-            Path("/usr/local/share/pdk"),
-            Path("/usr/share/pdk"),
-            Path.home() / "pdk",
-            Path.home() / ".volare",
-            Path.home() / "eda" / "pdk",
+            *manifest_roots,
         ]
 
         for candidate in candidates:
@@ -555,7 +553,7 @@ class EnvValidator:
             if candidate.name == "sky130A" and candidate.exists():
                 return candidate
             if candidate.exists():
-                match = EnvValidator._search_sky130a(candidate)
+                match = self._search_sky130a(candidate)
                 if match is not None:
                     return match
         return None

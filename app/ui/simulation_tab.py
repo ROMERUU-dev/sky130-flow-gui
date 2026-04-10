@@ -12,6 +12,7 @@ from PySide6.QtCore import QSignalBlocker
 from PySide6.QtCore import Qt
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QListView
 from PySide6.QtWidgets import QSizePolicy
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -274,6 +275,7 @@ class SimulationTab(QWidget):
             control.setValue(1.0)
 
         self._build_ui()
+        self._configure_combo_boxes()
         self._apply_visual_style()
         self._wire()
         self.refresh_history()
@@ -389,6 +391,15 @@ class SimulationTab(QWidget):
         page_layout.addStretch(1)
 
         scroll.setWidget(page)
+
+    def _configure_combo_boxes(self) -> None:
+        for combo in self.findChildren(QComboBox):
+            combo.setView(QListView(combo))
+            combo.setMaxVisibleItems(12)
+            combo.view().setObjectName("comboPopupView")
+            combo.view().setUniformItemSizes(True)
+            combo.view().setAlternatingRowColors(False)
+            combo.view().setVerticalScrollMode(QListView.ScrollPerPixel)
 
     def _build_header(self) -> QWidget:
         card = QFrame()
@@ -744,8 +755,33 @@ class SimulationTab(QWidget):
                 padding: 7px 9px;
                 color: #111827;
             }
+            QComboBox {
+                combobox-popup: 0;
+            }
             QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QDoubleSpinBox:focus, QTableWidget:focus {
                 border: 1px solid #93c5fd;
+            }
+            QComboBox QAbstractItemView#comboPopupView {
+                background: #ffffff;
+                color: #111827;
+                border: 1px solid #dfe7f2;
+                border-radius: 12px;
+                padding: 6px;
+                outline: 0;
+                selection-background-color: #dbeafe;
+                selection-color: #111827;
+            }
+            QComboBox QAbstractItemView#comboPopupView::item {
+                min-height: 30px;
+                padding: 6px 10px;
+                border-radius: 8px;
+            }
+            QComboBox QAbstractItemView#comboPopupView::item:hover {
+                background: #f5f8ff;
+            }
+            QComboBox QAbstractItemView#comboPopupView::item:selected {
+                background: #dbeafe;
+                color: #111827;
             }
             QPushButton, QToolButton {
                 background: #ffffff;

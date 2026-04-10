@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import Signal
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
@@ -20,6 +22,7 @@ from PySide6.QtWidgets import (
 from app.core.command_runner import CommandRunner
 from app.core.i18n import pick
 from app.core.layout_tools import infer_top_cell, resolve_layout_dir
+from app.core.magic_launcher import MagicLaunchBuilder
 from app.core.settings_manager import AppSettings
 from app.runners.magic_runner import MagicRunner
 from app.ui.widgets import append_log
@@ -37,6 +40,7 @@ class ExtractionTab(QWidget):
         self.lang = settings.language
         self.outputs_getter = outputs_getter
         self.builder = MagicRunner(settings)
+        self.launch_builder = MagicLaunchBuilder(settings)
         self.runner = CommandRunner()
 
         self.top_cell = QLineEdit()
@@ -75,14 +79,17 @@ class ExtractionTab(QWidget):
         btns = QHBoxLayout()
         run = QPushButton(pick(self.lang, "Correr", "Run"))
         stop = QPushButton(pick(self.lang, "Detener", "Stop"))
+        open_selected_mag = QPushButton(pick(self.lang, "Abrir .mag actual", "Open current .mag"))
         send = QPushButton(pick(self.lang, "Enviar resultado a Simulación", "Send result to Simulation"))
         btns.addWidget(run)
         btns.addWidget(stop)
+        btns.addWidget(open_selected_mag)
         btns.addWidget(send)
         layout.addLayout(btns)
 
         run.clicked.connect(self.run)
         stop.clicked.connect(self.runner.stop)
+        open_selected_mag.clicked.connect(self.open_selected_mag)
         send.clicked.connect(self._send_result)
 
         layout.addWidget(self.log)
@@ -147,3 +154,56 @@ class ExtractionTab(QWidget):
     def open_output_folder(self) -> None:
         if self.output_dir.text().strip():
             QDesktopServices.openUrl(Path(self.output_dir.text().strip()).as_uri())
+
+    def open_selected_mag(self) -> None:
+        outputs = self.outputs_getter()
+        layout_dir = resolve_layout_dir(outputs.base)
+        top = self.top_cell.text().strip() or infer_top_cell(layout_dir)
+        if not top:
+            QMessageBox.warning(
+                self,
+                pick(self.lang, "Sin layout", "No layout"),
+                pick(
+                    self.lang,
+                    "No se encontró una celda .mag para abrir. Define la celda top o agrega un layout válido.",
+                    "No .mag cell was found to open. Set the top cell or add a valid layout first.",
+                ),
+            )
+            return
+
+        mag_path = layout_dir / f"{top}.mag"
+        if not mag_path.is_file():
+            QMessageBox.warning(
+                self,
+                pick(self.lang, "Archivo no encontrado", "File not found"),
+                pick(
+                    self.lang,
+                    f"No existe el archivo de layout esperado: {mag_path}",
+                    f"The expected layout file does not exist: {mag_path}",
+                ),
+            )
+            return
+
+        self.top_cell.setText(top)
+        self._launch_magic(str(mag_path))
+
+    def _launch_magic(self, target_path: str) -> None:
+        launch = self.launch_builder.build(target_path)
+        try:
+            subprocess.Popen(launch.command, cwd=launch.cwd, env=launch.env)
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                pick(self.lang, "Error al abrir", "Launch error"),
+                f"{pick(self.lang, 'No se pudo abrir Magic', 'Failed to launch Magic')}: {exc}",
+            )
+            return
+
+        append_log(
+            self.log,
+            f"\n{pick(self.lang, 'Magic abierto', 'Magic launched')}\n"
+            f"{pick(self.lang, 'Objetivo', 'Target')}: {target_path}\n"
+            f"{pick(self.lang, 'Comando', 'Command')}: {' '.join(launch.command)}\n"
+            f"{pick(self.lang, 'Directorio', 'Working directory')}: {launch.cwd or '-'}\n",
+        )
+        self.send_status.emit(pick(self.lang, "Magic abierto", "Magic launched"))

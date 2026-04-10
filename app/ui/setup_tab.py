@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QCoreApplication, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -43,8 +44,9 @@ class SetupTab(QWidget):
         self._wizard_steps = [
             pick(self.lang, "1. Revisar sistema", "1. Review system"),
             pick(self.lang, "2. Instalar tools", "2. Install tools"),
-            pick(self.lang, "3. Aplicar rutas", "3. Apply paths"),
-            pick(self.lang, "4. Validar", "4. Validate"),
+            pick(self.lang, "3. Preparar PDK", "3. Prepare PDK"),
+            pick(self.lang, "4. Aplicar rutas", "4. Apply paths"),
+            pick(self.lang, "5. Validar", "5. Validate"),
         ]
         self._current_step = 0
 
@@ -72,21 +74,51 @@ class SetupTab(QWidget):
         self.ready_title = QLabel()
         self.ready_text = QLabel()
         self.ready_text.setWordWrap(True)
+        self.activity_badge = QLabel()
+        self.activity_text = QLabel()
         self.card_tools_value = QLabel("—")
         self.card_pdk_value = QLabel("—")
         self.card_python_value = QLabel("—")
         self.card_overall_value = QLabel("—")
+        self._spinner_frames = ("◜", "◠", "◝", "◞", "◡", "◟")
+        self._spinner_index = 0
+        self._activity_timer = QTimer(self)
+        self._activity_timer.setInterval(120)
+        self._activity_timer.timeout.connect(self._advance_spinner)
+        self._active_operations = 0
+        self._verification_completed = False
+        self._last_diagnosis = None
+        self._detected_defaults_available = False
+        self._pdk_candidates_available = False
+        self._pdk_preflight = None
+        self._pdk_source_preflight = None
+        self._runner_action = ""
 
         self.validate_btn = QPushButton(pick(self.lang, "Validar entorno", "Validate environment"))
         self.apply_defaults_btn = QPushButton(pick(self.lang, "Aplicar rutas detectadas", "Apply detected paths"))
         self.install_btn = QPushButton(pick(self.lang, "Instalar entorno VLSI en Ubuntu", "Install Ubuntu VLSI environment"))
         self.refresh_detect_btn = QPushButton(pick(self.lang, "Refrescar detección", "Refresh detection"))
+        self.detect_pdk_btn = QPushButton(pick(self.lang, "Buscar PDK reutilizable", "Find reusable PDK"))
+        self.use_pdk_btn = QPushButton(pick(self.lang, "Usar PDK seleccionado", "Use selected PDK"))
+        self.install_managed_pdk_btn = QPushButton(pick(self.lang, "Instalar PDK gestionado", "Install managed PDK"))
+        self.check_source_build_btn = QPushButton(pick(self.lang, "Precheck build desde fuentes", "Source-build precheck"))
+        self.build_from_sources_btn = QPushButton(pick(self.lang, "Build PDK desde fuentes", "Build PDK from sources"))
+        self.pdk_candidate_combo = QComboBox()
+        self.pdk_candidate_combo.setPlaceholderText(pick(self.lang, "Sin candidatos detectados", "No detected candidates"))
+        self.pdk_candidate_summary = QLabel()
+        self.pdk_candidate_summary.setWordWrap(True)
+        self.pdk_preflight_summary = QLabel()
+        self.pdk_preflight_summary.setWordWrap(True)
+        self.pdk_source_preflight_summary = QLabel()
+        self.pdk_source_preflight_summary.setWordWrap(True)
         self.prev_btn = QPushButton(pick(self.lang, "Atrás", "Back"))
         self.next_btn = QPushButton(pick(self.lang, "Siguiente", "Next"))
 
         self._build_ui()
         self._wire()
         self._sync_step_ui()
+        self._set_activity_idle()
+        self._sync_action_gates()
         self.refresh_validation()
         self.refresh_detection()
 
@@ -107,6 +139,14 @@ class SetupTab(QWidget):
         subtitle.setStyleSheet("color: #667085;")
         layout.addWidget(title)
         layout.addWidget(subtitle)
+        activity_row = QHBoxLayout()
+        self.activity_badge.setMinimumWidth(32)
+        self.activity_badge.setAlignment(Qt.AlignmentFlag.AlignCenter) if False else None
+        self.activity_text.setWordWrap(True)
+        activity_row.addWidget(self.activity_badge, 0)
+        activity_row.addWidget(self.activity_text, 1)
+        activity_row.addStretch(1)
+        layout.addLayout(activity_row)
         self.progress_bar.setRange(0, len(self._wizard_steps) - 1)
         self.progress_bar.setTextVisible(False)
         layout.addWidget(self.progress_label)
@@ -148,6 +188,7 @@ class SetupTab(QWidget):
 
         self.step_stack.addWidget(self._build_review_page())
         self.step_stack.addWidget(self._build_install_page())
+        self.step_stack.addWidget(self._build_pdk_page())
         self.step_stack.addWidget(self._build_apply_page())
         self.step_stack.addWidget(self._build_validate_page())
 
@@ -210,6 +251,20 @@ class SetupTab(QWidget):
                 border-radius: 11px;
                 padding: 5px 10px;
                 font-weight: 800;
+            }
+            QLabel#activityBadge {
+                min-width: 28px;
+                max-width: 28px;
+                min-height: 28px;
+                max-height: 28px;
+                border-radius: 14px;
+                font-weight: 900;
+                font-size: 15px;
+                padding: 0;
+            }
+            QLabel#activityText {
+                color: #475467;
+                font-weight: 700;
             }
             QLabel {
                 color: #344054;
@@ -282,6 +337,40 @@ class SetupTab(QWidget):
         layout.addLayout(actions)
         layout.addWidget(QLabel(pick(self.lang, "Detección automática", "Automatic detection")))
         layout.addWidget(self.detected_label, 1)
+        return page
+
+    def _build_pdk_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setSpacing(12)
+        layout.addWidget(self._page_heading(pick(self.lang, "Prepara un PDK reutilizable", "Prepare a reusable PDK")))
+        layout.addWidget(
+            self._page_hint(
+                pick(
+                    self.lang,
+                    "Antes de compilar nada, detecta si ya existe un `sky130A` utilizable en staging, volare, ciel u otras rutas comunes.",
+                    "Before compiling anything, detect whether a usable `sky130A` already exists in staging, volare, ciel, or other common roots.",
+                )
+            )
+        )
+        actions = QHBoxLayout()
+        actions.addWidget(self.detect_pdk_btn)
+        actions.addWidget(self.use_pdk_btn)
+        actions.addWidget(self.install_managed_pdk_btn)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+        layout.addWidget(QLabel(pick(self.lang, "Preflight de instalación gestionada", "Managed install preflight")))
+        layout.addWidget(self.pdk_preflight_summary)
+        source_actions = QHBoxLayout()
+        source_actions.addWidget(self.check_source_build_btn)
+        source_actions.addWidget(self.build_from_sources_btn)
+        source_actions.addStretch(1)
+        layout.addLayout(source_actions)
+        layout.addWidget(QLabel(pick(self.lang, "Prechecks de build desde fuentes", "Source-build prechecks")))
+        layout.addWidget(self.pdk_source_preflight_summary)
+        layout.addWidget(QLabel(pick(self.lang, "Candidato activo", "Active candidate")))
+        layout.addWidget(self.pdk_candidate_combo)
+        layout.addWidget(self.pdk_candidate_summary, 1)
         return page
 
     def _build_validate_page(self) -> QWidget:
@@ -359,6 +448,12 @@ class SetupTab(QWidget):
         self.apply_defaults_btn.clicked.connect(self.apply_detected_defaults)
         self.install_btn.clicked.connect(self.install_environment)
         self.refresh_detect_btn.clicked.connect(self.refresh_detection)
+        self.detect_pdk_btn.clicked.connect(self.refresh_pdk_candidates)
+        self.use_pdk_btn.clicked.connect(self.apply_selected_pdk_candidate)
+        self.install_managed_pdk_btn.clicked.connect(self.install_managed_pdk)
+        self.check_source_build_btn.clicked.connect(self.refresh_pdk_source_preflight)
+        self.build_from_sources_btn.clicked.connect(self.build_pdk_from_sources)
+        self.pdk_candidate_combo.currentIndexChanged.connect(self._update_pdk_candidate_summary)
         self.prev_btn.clicked.connect(self._go_prev)
         self.next_btn.clicked.connect(self._go_next)
         self.step_list.currentRowChanged.connect(self._set_step)
@@ -375,6 +470,8 @@ class SetupTab(QWidget):
     def _set_step(self, index: int) -> None:
         if index < 0 or index >= len(self._wizard_steps):
             return
+        if not self._verification_completed and index > 0:
+            return
         self._current_step = index
         self.step_stack.setCurrentIndex(index)
         if self.step_list.currentRow() != index:
@@ -383,7 +480,10 @@ class SetupTab(QWidget):
 
     def _sync_step_ui(self) -> None:
         self.prev_btn.setEnabled(self._current_step > 0)
-        self.next_btn.setEnabled(self._current_step < len(self._wizard_steps) - 1)
+        can_move_forward = self._current_step < len(self._wizard_steps) - 1 and (
+            self._verification_completed or self._current_step > 0
+        )
+        self.next_btn.setEnabled(can_move_forward)
         self.progress_bar.setValue(self._current_step)
         self.progress_label.setText(
             pick(
@@ -394,9 +494,19 @@ class SetupTab(QWidget):
         )
         if self.step_list.currentRow() != self._current_step:
             self.step_list.setCurrentRow(self._current_step)
+        for index in range(self.step_list.count()):
+            item = self.step_list.item(index)
+            flags = item.flags()
+            if index == 0 or self._verification_completed:
+                item.setFlags(flags | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            else:
+                item.setFlags(flags & ~Qt.ItemIsEnabled)
 
     def refresh_validation(self) -> None:
+        self._begin_activity(pick(self.lang, "Validando entorno...", "Validating environment..."))
         diagnosis = self.validator.diagnose(self.settings, lang=self.lang)
+        self._last_diagnosis = diagnosis
+        self._verification_completed = True
         rows = self.validator.validation_rows(diagnosis, lang=self.lang)
         ok_count = sum(1 for row in rows if row.ok)
         total = len(rows)
@@ -414,10 +524,16 @@ class SetupTab(QWidget):
             self.status_table.setItem(i, 1, QTableWidgetItem(row.status))
             self.status_table.setItem(i, 2, QTableWidgetItem(row.detail))
         self.status_table.resizeColumnsToContents()
+        self._sync_action_gates()
+        self._finish_activity(True, pick(self.lang, "Validación lista", "Validation ready"))
 
     def refresh_detection(self) -> None:
+        self._begin_activity(pick(self.lang, "Refrescando detección...", "Refreshing detection..."))
         lines = self.setup_mgr.summarize_detection(self.settings)
         diagnosis = self.validator.diagnose(self.settings, lang=self.lang)
+        self._last_diagnosis = diagnosis
+        self._verification_completed = True
+        self._detected_defaults_available = bool(self.setup_mgr.detect_tool_defaults() or self.setup_mgr.detect_pdk_defaults())
         translated: list[str] = []
         for line in lines:
             if line == "Detected tools:":
@@ -441,6 +557,143 @@ class SetupTab(QWidget):
             translated.append(pick(self.lang, "Recomendaciones:", "Recommendations:"))
             translated.extend(f"- {item}" for item in diagnosis.recommendations)
         self.detected_label.setText("\n".join(translated))
+        self.refresh_pdk_candidates()
+        self._sync_action_gates()
+        self._finish_activity(True, pick(self.lang, "Detección actualizada", "Detection updated"))
+
+    def refresh_pdk_candidates(self) -> None:
+        self._begin_activity(pick(self.lang, "Buscando PDK reutilizable...", "Searching reusable PDK..."))
+        current_path = self.pdk_candidate_combo.currentData()
+        candidates = self.setup_mgr.detect_reusable_pdk_candidates()
+        self.pdk_candidate_combo.blockSignals(True)
+        self.pdk_candidate_combo.clear()
+        for candidate in candidates:
+            self.pdk_candidate_combo.addItem(
+                f"{candidate.status.upper()} | {candidate.sky130a_path}",
+                candidate.sky130a_path,
+            )
+        self.pdk_candidate_combo.blockSignals(False)
+        self._pdk_candidates_available = bool(candidates)
+        if current_path:
+            index = self.pdk_candidate_combo.findData(current_path)
+            if index >= 0:
+                self.pdk_candidate_combo.setCurrentIndex(index)
+        if self.pdk_candidate_combo.count() and self.pdk_candidate_combo.currentIndex() < 0:
+            self.pdk_candidate_combo.setCurrentIndex(0)
+        self._refresh_pdk_preflight()
+        self.refresh_pdk_source_preflight()
+        self._update_pdk_candidate_summary()
+        self._sync_action_gates()
+        self._finish_activity(True, pick(self.lang, "Búsqueda de PDK lista", "PDK search ready"))
+
+    def apply_selected_pdk_candidate(self) -> None:
+        sky130a_path = str(self.pdk_candidate_combo.currentData() or "").strip()
+        if not sky130a_path:
+            self.pdk_candidate_summary.setText(
+                pick(self.lang, "No hay un PDK seleccionado todavía.", "No PDK candidate is selected yet.")
+            )
+            return
+        self._begin_activity(pick(self.lang, "Adoptando PDK detectado...", "Adopting detected PDK..."))
+        changed = self.setup_mgr.apply_pdk_candidate(self.settings, sky130a_path)
+        self.refresh_detection()
+        self.refresh_validation()
+        if changed:
+            self.settings_updated.emit(self.settings)
+            self.send_status.emit(pick(self.lang, "PDK detectado aplicado", "Detected PDK applied"))
+            self.log.append(
+                pick(
+                    self.lang,
+                    f"Se adoptó el PDK detectado en {sky130a_path}.\n",
+                    f"The detected PDK at {sky130a_path} was adopted.\n",
+                )
+            )
+            self._set_step(3)
+            self._finish_activity(True, pick(self.lang, "PDK listo para usar", "PDK ready to use"))
+            return
+        self._finish_activity(True, pick(self.lang, "El PDK ya estaba aplicado", "The PDK was already applied"))
+
+    def install_managed_pdk(self) -> None:
+        self._begin_activity(pick(self.lang, "Instalando PDK gestionado...", "Installing managed PDK..."))
+        result = self.setup_mgr.install_managed_pdk(self.settings)
+        if result.ok:
+            if result.changed:
+                self.settings_updated.emit(self.settings)
+            self.log.append(
+                pick(
+                    self.lang,
+                    f"{result.message}\n",
+                    f"{result.message}\n",
+                )
+            )
+            self.send_status.emit(pick(self.lang, "PDK gestionado listo", "Managed PDK ready"))
+            self.refresh_detection()
+            self.refresh_validation()
+            self._set_step(3)
+            self._finish_activity(True, pick(self.lang, "PDK gestionado instalado", "Managed PDK installed"))
+            return
+        self.log.append(pick(self.lang, f"{result.message}\n", f"{result.message}\n"))
+        self.send_status.emit(pick(self.lang, "Instalación de PDK pendiente", "PDK installation pending"))
+        self._refresh_pdk_preflight()
+        self._finish_activity(False, pick(self.lang, "No se pudo instalar el PDK", "Failed to install PDK"))
+
+    def refresh_pdk_source_preflight(self) -> None:
+        self._pdk_source_preflight = self.setup_mgr.pdk_source_build_preflight(self.settings)
+        summary = self._pdk_source_preflight
+        missing = ", ".join(summary.missing_commands) if summary.missing_commands else pick(self.lang, "ninguno", "none")
+        self.pdk_source_preflight_summary.setText(
+            pick(
+                self.lang,
+                f"Build root: {summary.build_root}\n"
+                f"Destino: {summary.target_sky130a}\n"
+                f"Espacio libre: {summary.free_bytes / (1024 ** 3):.1f} GB\n"
+                f"Fuente pinneada: {'sí' if summary.has_pinned_source else 'no'}\n"
+                f"Comandos faltantes: {missing}\n"
+                f"Candidato reutilizable detectado: {'sí' if summary.reusable_candidate_available else 'no'}\n"
+                f"Listo para build: {'sí' if summary.ready else 'no'}",
+                f"Build root: {summary.build_root}\n"
+                f"Target: {summary.target_sky130a}\n"
+                f"Free space: {summary.free_bytes / (1024 ** 3):.1f} GB\n"
+                f"Pinned source: {'yes' if summary.has_pinned_source else 'no'}\n"
+                f"Missing commands: {missing}\n"
+                f"Reusable candidate detected: {'yes' if summary.reusable_candidate_available else 'no'}\n"
+                f"Ready to build: {'yes' if summary.ready else 'no'}",
+            )
+        )
+        self._sync_action_gates()
+
+    def build_pdk_from_sources(self) -> None:
+        self.refresh_pdk_source_preflight()
+        summary = self._pdk_source_preflight
+        if summary is None or not summary.ready:
+            self.log.append(
+                pick(
+                    self.lang,
+                    "El build desde fuentes sigue bloqueado. Revisa el panel de prechecks.\n",
+                    "Source build is still blocked. Review the precheck panel.\n",
+                )
+            )
+            return
+        script_path = self.setup_mgr.pdk_source_build_script()
+        if not script_path.exists():
+            self.log.append(
+                pick(
+                    self.lang,
+                    f"Script de build no encontrado: {script_path}\n",
+                    f"Build script not found: {script_path}\n",
+                )
+            )
+            return
+        self._begin_activity(pick(self.lang, "Compilando PDK desde fuentes...", "Building PDK from sources..."))
+        self.log.append(
+            pick(
+                self.lang,
+                "Lanzando build gestionado del PDK desde fuentes pinneadas. Este proceso puede tardar bastante.\n",
+                "Launching managed PDK build from pinned sources. This process can take a while.\n",
+            )
+        )
+        self.send_status.emit(pick(self.lang, "Build de PDK en progreso", "PDK build in progress"))
+        self._runner_action = "build_pdk_sources"
+        self.runner.run(CommandSpec(command=self.setup_mgr.pdk_source_build_command()))
 
     def apply_detected_defaults(self) -> None:
         self._apply_detected_defaults(automatic=False)
@@ -456,6 +709,7 @@ class SetupTab(QWidget):
                 )
             )
             return
+        self._begin_activity(pick(self.lang, "Instalando toolchain...", "Installing toolchain..."))
         self.log.append(
             pick(
                 self.lang,
@@ -465,10 +719,14 @@ class SetupTab(QWidget):
         )
         self.send_status.emit(pick(self.lang, "Instalación en progreso", "Installation in progress"))
         self._set_step(1)
+        self._runner_action = "install_tools"
         self.runner.run(CommandSpec(command=self.setup_mgr.installer_command()))
 
     def _on_finished(self, code: int, status: str) -> None:
-        if code == 0:
+        action = self._runner_action
+        self._runner_action = ""
+
+        if code == 0 and action == "install_tools":
             self.log.append(
                 pick(
                     self.lang,
@@ -480,7 +738,38 @@ class SetupTab(QWidget):
             self.refresh_detection()
             self.refresh_validation()
             self._apply_detected_defaults(automatic=True)
-        else:
+            self._finish_activity(True, pick(self.lang, "Instalación lista", "Installation ready"))
+            return
+
+        if code == 0 and action == "build_pdk_sources":
+            self.log.append(
+                pick(
+                    self.lang,
+                    "\nBuild del PDK completado. Refrescando detección y validación.\n",
+                    "\nPDK build completed. Refreshing detection and validation.\n",
+                )
+            )
+            self.send_status.emit(pick(self.lang, "Build de PDK listo", "PDK build ready"))
+            self.refresh_detection()
+            self.refresh_validation()
+            self._set_step(3)
+            self._finish_activity(True, pick(self.lang, "Build de PDK listo", "PDK build ready"))
+            return
+
+        if action == "build_pdk_sources":
+            self.log.append(
+                pick(
+                    self.lang,
+                    f"\nEl build del PDK falló (exit={code}, status={status}). Revisa el log y corrige el precheck bloqueante.\n",
+                    f"\nThe PDK build failed (exit={code}, status={status}). Review the log and fix the blocking precheck.\n",
+                )
+            )
+            self.send_status.emit(pick(self.lang, "Build de PDK falló", "PDK build failed"))
+            self.refresh_pdk_source_preflight()
+            self._finish_activity(False, pick(self.lang, "Build de PDK falló", "PDK build failed"))
+            return
+
+        if action == "install_tools":
             self.log.append(
                 pick(
                     self.lang,
@@ -489,8 +778,17 @@ class SetupTab(QWidget):
                 )
             )
             self.send_status.emit(pick(self.lang, "Setup falló", "Setup failed"))
+            self._finish_activity(False, pick(self.lang, "Instalación falló", "Installation failed"))
+            return
+
+        self._finish_activity(code == 0, pick(self.lang, "Acción completada", "Action finished"))
 
     def _apply_detected_defaults(self, automatic: bool) -> None:
+        self._begin_activity(
+            pick(self.lang, "Aplicando rutas detectadas...", "Applying detected paths...")
+            if not automatic
+            else pick(self.lang, "Guardando rutas detectadas...", "Saving detected paths...")
+        )
         changed = self.setup_mgr.apply_detected_defaults(self.settings)
         self.refresh_detection()
         self.refresh_validation()
@@ -513,7 +811,8 @@ class SetupTab(QWidget):
                     )
                 )
             self.send_status.emit(pick(self.lang, "Rutas detectadas aplicadas", "Detected paths applied"))
-            self._set_step(3)
+            self._set_step(4)
+            self._finish_activity(True, pick(self.lang, "Rutas aplicadas", "Paths applied"))
             return
 
         if automatic:
@@ -532,6 +831,7 @@ class SetupTab(QWidget):
                     "No changes were applied: valid paths already existed or no compatible installation was detected.\n",
                 )
             )
+        self._finish_activity(True, pick(self.lang, "Sin cambios pendientes", "No pending changes"))
 
     def _update_ready_state(self, diagnosis) -> None:
         tools_ready = all(tool.status in {"ok", "alias"} for tool in diagnosis.tools.values())
@@ -577,5 +877,206 @@ class SetupTab(QWidget):
                 "You can go back to Simulation, Extraction, or LVS with confidence."
                 if overall_ready
                 else "The app will not report the environment as ready while the PDK is missing, `.venv` is broken, or write permissions are insufficient.",
+            )
+        )
+
+    def _set_activity_idle(self) -> None:
+        self.activity_badge.setObjectName("activityBadge")
+        self.activity_badge.setStyleSheet(
+            "background: #f2f4f7; color: #667085; border: 1px solid #e4e7ec;"
+        )
+        self.activity_badge.setText("•")
+        self.activity_text.setObjectName("activityText")
+        self.activity_text.setText(pick(self.lang, "Esperando acciones del asistente", "Waiting for setup actions"))
+
+    def _begin_activity(self, message: str) -> None:
+        self._active_operations += 1
+        self._spinner_index = 0
+        self.activity_badge.setText(self._spinner_frames[self._spinner_index])
+        self.activity_badge.setStyleSheet(
+            "background: #eef4ff; color: #2563eb; border: 1px solid #cfe0ff;"
+        )
+        self.activity_text.setText(message)
+        if not self._activity_timer.isActive():
+            self._activity_timer.start()
+        self._set_action_buttons_enabled(False)
+        QCoreApplication.processEvents()
+
+    def _finish_activity(self, success: bool, message: str) -> None:
+        self._active_operations = max(0, self._active_operations - 1)
+        if self._active_operations > 0:
+            return
+        self._activity_timer.stop()
+        self.activity_badge.setText("✓" if success else "!")
+        self.activity_badge.setStyleSheet(
+            "background: #ecfdf3; color: #0f9d8a; border: 1px solid #b7ebcf;"
+            if success
+            else "background: #fef3f2; color: #d92d20; border: 1px solid #fecdca;"
+        )
+        self.activity_text.setText(message)
+        self._set_action_buttons_enabled(True)
+        QTimer.singleShot(1800, self._restore_idle_if_quiet)
+        QCoreApplication.processEvents()
+
+    def _restore_idle_if_quiet(self) -> None:
+        if self._active_operations == 0:
+            self._set_activity_idle()
+
+    def _advance_spinner(self) -> None:
+        if self._active_operations <= 0:
+            self._activity_timer.stop()
+            return
+        self._spinner_index = (self._spinner_index + 1) % len(self._spinner_frames)
+        self.activity_badge.setText(self._spinner_frames[self._spinner_index])
+
+    def _set_action_buttons_enabled(self, enabled: bool) -> None:
+        if not enabled:
+            self.validate_btn.setEnabled(False)
+            self.apply_defaults_btn.setEnabled(False)
+            self.install_btn.setEnabled(False)
+            self.refresh_detect_btn.setEnabled(False)
+            self.detect_pdk_btn.setEnabled(False)
+            self.use_pdk_btn.setEnabled(False)
+            self.install_managed_pdk_btn.setEnabled(False)
+            self.check_source_build_btn.setEnabled(False)
+            self.build_from_sources_btn.setEnabled(False)
+            self.prev_btn.setEnabled(False)
+            self.next_btn.setEnabled(False)
+            return
+        self._sync_action_gates()
+
+    def _sync_action_gates(self) -> None:
+        if self._active_operations > 0:
+            return
+        diagnosis = self._last_diagnosis
+        tools_ready = bool(diagnosis) and all(tool.status in {"ok", "alias"} for tool in diagnosis.tools.values())
+
+        self.validate_btn.setEnabled(True)
+        self.refresh_detect_btn.setEnabled(True)
+        self.install_btn.setEnabled(self._verification_completed and not tools_ready)
+        self.apply_defaults_btn.setEnabled(self._verification_completed and self._detected_defaults_available)
+        self.detect_pdk_btn.setEnabled(self._verification_completed)
+        self.use_pdk_btn.setEnabled(self._verification_completed and self._pdk_candidates_available)
+        self.install_managed_pdk_btn.setEnabled(
+            self._verification_completed
+            and self._pdk_preflight is not None
+            and self._pdk_preflight.enough_space
+            and self._pdk_preflight.existing_status == "missing"
+            and bool(self._pdk_preflight.selected_candidate)
+        )
+        self.check_source_build_btn.setEnabled(self._verification_completed)
+        self.build_from_sources_btn.setEnabled(
+            self._verification_completed
+            and self._pdk_source_preflight is not None
+            and self._pdk_source_preflight.ready
+        )
+        self.install_btn.setToolTip(
+            pick(
+                self.lang,
+                "Primero verifica el sistema." if not self._verification_completed else
+                "Las tools base ya están instaladas." if tools_ready else
+                "Instala el toolchain base sólo si aún falta.",
+                "Verify the system first." if not self._verification_completed else
+                "The base tools are already installed." if tools_ready else
+                "Install the base toolchain only if it is still missing.",
+            )
+        )
+        self.apply_defaults_btn.setToolTip(
+            pick(
+                self.lang,
+                "Primero verifica y detecta rutas." if not self._verification_completed else
+                "No hay rutas nuevas detectadas para aplicar." if not self._detected_defaults_available else
+                "Aplica sólo las rutas detectadas válidas.",
+                "Verify and detect paths first." if not self._verification_completed else
+                "There are no new detected paths to apply." if not self._detected_defaults_available else
+                "Apply only valid detected paths.",
+            )
+        )
+        self.use_pdk_btn.setToolTip(
+            pick(
+                self.lang,
+                "Primero verifica y busca candidatos de PDK." if not self._verification_completed else
+                "No hay un PDK reutilizable detectado todavía." if not self._pdk_candidates_available else
+                "Adopta el `sky130A` detectado como PDK activo de la app.",
+                "Verify first and search for PDK candidates." if not self._verification_completed else
+                "No reusable PDK was detected yet." if not self._pdk_candidates_available else
+                "Adopt the detected `sky130A` as the app's active PDK.",
+            )
+        )
+        self.install_managed_pdk_btn.setToolTip(
+            pick(
+                self.lang,
+                "Primero verifica y busca un PDK reutilizable." if not self._verification_completed else
+                "No hay espacio libre o no existe candidato reutilizable." if (
+                    self._pdk_preflight is None
+                    or not self._pdk_preflight.enough_space
+                    or not self._pdk_preflight.selected_candidate
+                ) else
+                "Instala un PDK gestionado en la ruta canónica configurada.",
+                "Verify first and search for a reusable PDK." if not self._verification_completed else
+                "There is not enough free space or no reusable candidate exists." if (
+                    self._pdk_preflight is None
+                    or not self._pdk_preflight.enough_space
+                    or not self._pdk_preflight.selected_candidate
+                ) else
+                "Install a managed PDK in the configured canonical path.",
+            )
+        )
+        self.build_from_sources_btn.setToolTip(
+            pick(
+                self.lang,
+                "Primero verifica y ejecuta los prechecks de build." if not self._verification_completed else
+                "El build desde fuentes sigue bloqueado por dependencias, pinning, espacio, destino o candidatos reutilizables." if (
+                    self._pdk_source_preflight is None or not self._pdk_source_preflight.ready
+                ) else
+                "La máquina ya cumple las condiciones mínimas para intentar un build desde fuentes.",
+                "Verify first and run the source-build prechecks." if not self._verification_completed else
+                "Source build is still blocked by dependencies, pinning, space, target state, or reusable candidates." if (
+                    self._pdk_source_preflight is None or not self._pdk_source_preflight.ready
+                ) else
+                "The machine now satisfies the minimum conditions to attempt a source build.",
+            )
+        )
+        self._sync_step_ui()
+
+    def _update_pdk_candidate_summary(self) -> None:
+        sky130a_path = str(self.pdk_candidate_combo.currentData() or "").strip()
+        if not sky130a_path:
+            self.pdk_candidate_summary.setText(
+                pick(
+                    self.lang,
+                    "Aún no se detectó un `sky130A` reutilizable. Usa la búsqueda para revisar staging locales, volare, ciel y rutas comunes.",
+                    "No reusable `sky130A` has been detected yet. Use the search to inspect local staging, volare, ciel, and common roots.",
+                )
+            )
+            return
+        for candidate in self.setup_mgr.detect_reusable_pdk_candidates():
+            if candidate.sky130a_path == sky130a_path:
+                self.pdk_candidate_summary.setText(
+                    pick(
+                        self.lang,
+                        f"Origen: {candidate.source}\nEstado: {candidate.status}\nRoot: {candidate.root_path}\nDetalle: {candidate.detail}",
+                        f"Source: {candidate.source}\nStatus: {candidate.status}\nRoot: {candidate.root_path}\nDetail: {candidate.detail}",
+                    )
+                )
+                return
+        self.pdk_candidate_summary.setText(sky130a_path)
+
+    def _refresh_pdk_preflight(self) -> None:
+        self._pdk_preflight = self.setup_mgr.pdk_install_preflight(self.settings)
+        summary = self._pdk_preflight
+        self.pdk_preflight_summary.setText(
+            pick(
+                self.lang,
+                f"Destino: {summary.target_sky130a}\n"
+                f"Modo: {summary.install_mode}\n"
+                f"Espacio libre: {summary.free_bytes / (1024 ** 3):.1f} GB\n"
+                f"Estado actual del destino: {summary.existing_status}\n"
+                f"Candidato reutilizable: {summary.selected_candidate or 'ninguno'}",
+                f"Target: {summary.target_sky130a}\n"
+                f"Mode: {summary.install_mode}\n"
+                f"Free space: {summary.free_bytes / (1024 ** 3):.1f} GB\n"
+                f"Current target status: {summary.existing_status}\n"
+                f"Reusable candidate: {summary.selected_candidate or 'none'}",
             )
         )

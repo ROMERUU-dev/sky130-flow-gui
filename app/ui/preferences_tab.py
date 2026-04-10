@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -25,6 +26,7 @@ from app.core.i18n import pick
 from app.core.integration_manager import IntegrationManager
 from app.core.settings_manager import AppSettings
 from app.core.update_manager import UpdateManager
+from app.ui.setup_tab import SetupTab
 from app.ui.widgets import browse_dir, browse_file
 
 
@@ -32,6 +34,7 @@ class PreferencesTab(QWidget):
     """Configure tool and PDK paths and validate environment."""
 
     settings_updated = Signal(object)
+    send_status = Signal(str)
 
     def __init__(self, settings: AppSettings) -> None:
         super().__init__()
@@ -57,12 +60,23 @@ class PreferencesTab(QWidget):
         )
         self.ops_log = QTextEdit()
         self.ops_log.setReadOnly(True)
+        self.subtabs = QTabWidget()
+        self.subtabs.setDocumentMode(True)
+        self.subtabs.setObjectName("preferencesSubtabs")
+        self.general_page = QWidget()
+        self.general_page.setObjectName("preferencesGeneralPage")
+        self.general_page.setAttribute(Qt.WA_StyledBackground, True)
+        self.setup_tab = SetupTab(self.settings)
+        self.setup_tab.setObjectName("preferencesSetupPage")
+        self.setup_tab.setAttribute(Qt.WA_StyledBackground, True)
 
         self._pending_status_check = False
         self._last_action = ""
 
         self._build_ui()
         self._wire_runner()
+        self.setup_tab.settings_updated.connect(self.settings_updated.emit)
+        self.setup_tab.send_status.connect(self.send_status.emit)
         self.refresh_validation()
 
     def _add_path_row(self, form: QFormLayout, key: str, label: str, value: str, is_dir: bool = False) -> None:
@@ -80,6 +94,9 @@ class PreferencesTab(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        general_layout = QVBoxLayout(self.general_page)
+        general_layout.setContentsMargins(14, 14, 14, 14)
         form = QFormLayout()
 
         tools = asdict(self.settings.tool_paths)
@@ -97,20 +114,20 @@ class PreferencesTab(QWidget):
         self._add_path_row(form, "pdk.netgen_setup", "Netgen setup", pdk["netgen_setup"])
         self._add_path_row(form, "pdk.klayout_antenna_deck", "KLayout antenna deck", pdk["klayout_antenna_deck"])
 
-        layout.addLayout(form)
+        general_layout.addLayout(form)
 
         btns = QHBoxLayout()
         save = QPushButton(pick(self.lang, "Guardar preferencias", "Save Preferences"))
         validate = QPushButton(pick(self.lang, "Validar", "Validate"))
         btns.addWidget(save)
         btns.addWidget(validate)
-        layout.addLayout(btns)
+        general_layout.addLayout(btns)
 
         save.clicked.connect(self.save)
         validate.clicked.connect(self.refresh_validation)
 
-        layout.addWidget(QLabel(pick(self.lang, "Validación de entorno", "Environment Validation")))
-        layout.addWidget(self.status_table)
+        general_layout.addWidget(QLabel(pick(self.lang, "Validación de entorno", "Environment Validation")))
+        general_layout.addWidget(self.status_table)
 
         ops_buttons = QHBoxLayout()
         check_updates = QPushButton(pick(self.lang, "Buscar actualizaciones", "Check for updates"))
@@ -124,9 +141,52 @@ class PreferencesTab(QWidget):
         update_now.clicked.connect(self.apply_updates)
         install_icon.clicked.connect(self.install_icon)
 
-        layout.addWidget(QLabel(pick(self.lang, "Operaciones de instalación / actualización", "Installation / update operations")))
-        layout.addLayout(ops_buttons)
-        layout.addWidget(self.ops_log)
+        general_layout.addWidget(
+            QLabel(pick(self.lang, "Operaciones de instalación / actualización", "Installation / update operations"))
+        )
+        general_layout.addLayout(ops_buttons)
+        general_layout.addWidget(self.ops_log)
+
+        self.subtabs.addTab(self.general_page, pick(self.lang, "General", "General"))
+        self.subtabs.addTab(self.setup_tab, pick(self.lang, "Entorno", "Setup"))
+        layout.addWidget(self.subtabs)
+        self.setStyleSheet(
+            """
+            QTabWidget#preferencesSubtabs::pane {
+                border: 1px solid #e8eef7;
+                border-radius: 18px;
+                background: #ffffff;
+                margin-top: 8px;
+            }
+            QTabWidget#preferencesSubtabs QTabBar {
+                background: transparent;
+            }
+            QTabWidget#preferencesSubtabs QWidget#preferencesGeneralPage,
+            QTabWidget#preferencesSubtabs QWidget#preferencesSetupPage {
+                background: #ffffff;
+            }
+            QTabWidget#preferencesSubtabs QTabBar::tab {
+                background: #f8fafc;
+                color: #475569;
+                border: 1px solid #e5e7eb;
+                border-bottom: 0;
+                padding: 10px 16px;
+                margin-right: 6px;
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+                font-weight: 700;
+            }
+            QTabWidget#preferencesSubtabs QTabBar::tab:selected {
+                background: #ffffff;
+                color: #1d4ed8;
+                border-color: #d8e5ff;
+            }
+            QTabWidget#preferencesSubtabs QTabBar::tab:hover:!selected {
+                background: #eef5ff;
+                color: #1d4ed8;
+            }
+            """
+        )
 
     def _wire_runner(self) -> None:
         self.cmd_runner.started.connect(lambda cmd: self.ops_log.append(f"$ {cmd}"))

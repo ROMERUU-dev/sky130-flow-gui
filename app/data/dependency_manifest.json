@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "default_channel": "stable",
+  "channels": {
+    "stable": {
+      "description": "Pinned operational baseline for Ubuntu/Debian setups. Prefer distro packages and existing local PDK installations over live upstream fetches.",
+      "bootstrap": {
+        "apt_packages": [
+          "git",
+          "xschem",
+          "ngspice",
+          "magic",
+          "netgen-lvs",
+          "klayout",
+          "python3",
+          "python3-pip",
+          "python3-venv",
+          "libxcb-cursor0",
+          "libxcb-xinerama0",
+          "libxkbcommon-x11-0",
+          "libxcb-xkb1",
+          "libxcb-icccm4",
+          "libxcb-image0",
+          "libxcb-keysyms1",
+          "libxcb-render-util0",
+          "libxcb-randr0",
+          "libxcb-shape0",
+          "libxcb-xfixes0",
+          "libgl1"
+        ]
+      },
+      "pdk": {
+        "strategy": "external-managed",
+        "managed_root": "~/pdk",
+        "managed_install_mode": "symlink",
+        "minimum_free_gb": 8,
+        "source_build_root": "~/src/pdk-build",
+        "source_build_minimum_free_gb": 20,
+        "source_build_required_commands": [
+          "git",
+          "make",
+          "gcc",
+          "g++",
+          "autoconf",
+          "automake",
+          "libtoolize",
+          "aclocal",
+          "m4",
+          "tclsh",
+          "wish",
+          "tcsh"
+        ],
+        "source_build_open_pdks_repo": "https://github.com/RTimothyEdwards/open_pdks.git",
+        "source_build_open_pdks_ref": "1.0.321",
+        "source_build_configure_args": [
+          "--enable-sky130-pdk"
+        ],
+        "preferred_sources": [
+          "settings",
+          "environment",
+          "common-local-roots"
+        ],
+        "search_roots": [
+          "/usr/local/share/pdk",
+          "/usr/share/pdk",
+          "~/pdk",
+          "~/.volare",
+          "~/eda/pdk",
+          "~/tt-pdk",
+          "~/tt-pdk/volare",
+          "~/tt-pdk/ciel"
+        ]
+      }
+    },
+    "latest-tested": {
+      "description": "Reserved channel for newer dependency combinations after explicit validation. Not used automatically yet.",
+      "bootstrap": {
+        "apt_packages": [
+          "git",
+          "xschem",
+          "ngspice",
+          "magic",
+          "netgen-lvs",
+          "klayout",
+          "python3",
+          "python3-pip",
+          "python3-venv",
+          "libxcb-cursor0",
+          "libxcb-xinerama0",
+          "libxkbcommon-x11-0",
+          "libxcb-xkb1",
+          "libxcb-icccm4",
+          "libxcb-image0",
+          "libxcb-keysyms1",
+          "libxcb-render-util0",
+          "libxcb-randr0",
+          "libxcb-shape0",
+          "libxcb-xfixes0",
+          "libgl1"
+        ]
+      },
+      "pdk": {
+        "strategy": "external-managed",
+        "managed_root": "~/pdk",
+        "managed_install_mode": "symlink",
+        "minimum_free_gb": 8,
+        "source_build_root": "~/src/pdk-build",
+        "source_build_minimum_free_gb": 20,
+        "source_build_required_commands": [
+          "git",
+          "make",
+          "gcc",
+          "g++",
+          "autoconf",
+          "automake",
+          "libtoolize",
+          "aclocal",
+          "m4",
+          "tclsh",
+          "wish",
+          "tcsh"
+        ],
+        "source_build_open_pdks_repo": "https://github.com/RTimothyEdwards/open_pdks.git",
+        "source_build_open_pdks_ref": "1.0.321",
+        "source_build_configure_args": [
+          "--enable-sky130-pdk"
+        ],
+        "preferred_sources": [
+          "settings",
+          "environment",
+          "common-local-roots"
+        ],
+        "search_roots": [
+          "/usr/local/share/pdk",
+          "/usr/share/pdk",
+          "~/pdk",
+          "~/.volare",
+          "~/eda/pdk",
+          "~/tt-pdk",
+          "~/tt-pdk/volare",
+          "~/tt-pdk/ciel"
+        ]
+      }
+    }
+  }
+}

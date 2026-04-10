@@ -3,8 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CHANNEL="${1:-stable}"
+MANIFEST_PATH="$REPO_ROOT/app/data/dependency_manifest.json"
 
 echo "== SKY130 Flow Ubuntu bootstrap =="
+echo
+echo "Dependency channel: $CHANNEL"
 echo
 
 if ! command -v apt-get >/dev/null 2>&1; then
@@ -14,32 +18,44 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required to read the dependency manifest at $MANIFEST_PATH."
+  exit 1
+fi
+
+if [ ! -f "$MANIFEST_PATH" ]; then
+  echo "Dependency manifest not found at $MANIFEST_PATH."
+  exit 1
+fi
+
+mapfile -t APT_PACKAGES < <(
+  python3 - "$MANIFEST_PATH" "$CHANNEL" <<'PY'
+import json
+import sys
+
+manifest_path, channel = sys.argv[1:3]
+with open(manifest_path, "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+channels = data.get("channels", {})
+if channel not in channels:
+    available = ", ".join(sorted(channels))
+    raise SystemExit(f"Unknown dependency channel: {channel}. Available: {available}")
+packages = channels[channel].get("bootstrap", {}).get("apt_packages", [])
+for package in packages:
+    print(package)
+PY
+)
+
+if [ "${#APT_PACKAGES[@]}" -eq 0 ]; then
+  echo "No apt packages were defined for channel '$CHANNEL'."
+  exit 1
+fi
+
 echo "Updating package index..."
 apt-get update
 
 echo "Installing core VLSI toolchain packages..."
-apt-get install -y \
-  git \
-  xschem \
-  ngspice \
-  magic \
-  netgen-lvs \
-  klayout \
-  python3 \
-  python3-pip \
-  python3-venv \
-  libxcb-cursor0 \
-  libxcb-xinerama0 \
-  libxkbcommon-x11-0 \
-  libxcb-xkb1 \
-  libxcb-icccm4 \
-  libxcb-image0 \
-  libxcb-keysyms1 \
-  libxcb-render-util0 \
-  libxcb-randr0 \
-  libxcb-shape0 \
-  libxcb-xfixes0 \
-  libgl1
+apt-get install -y "${APT_PACKAGES[@]}"
 
 echo
 echo "Package installation finished."

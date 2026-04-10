@@ -102,6 +102,32 @@ class EnvValidatorTest(unittest.TestCase):
         self.assertTrue(diagnosis.venv_exists)
         self.assertTrue(any("belongs to root" in problem for problem in diagnosis.problems))
 
+    def test_netgen_version_probe_uses_batch_quit(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return SimpleNamespace(returncode=0, stdout="Netgen 1.5.133\n", stderr="")
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            version = self.validator._query_version("netgen", "/usr/bin/netgen-lvs")
+
+        self.assertEqual(version, "Netgen 1.5.133")
+        self.assertEqual(calls, [["/usr/bin/netgen-lvs", "-batch", "quit"]])
+
+    def test_magic_version_probe_prefers_noninteractive_flags(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return SimpleNamespace(returncode=0, stdout="8.3.452\n", stderr="")
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            version = self.validator._query_version("magic", "/usr/bin/magic")
+
+        self.assertEqual(version, "8.3.452")
+        self.assertEqual(calls, [["/usr/bin/magic", "-dnull", "-noconsole", "-version"]])
+
 
 if __name__ == "__main__":
     unittest.main()
