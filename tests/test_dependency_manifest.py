@@ -20,6 +20,12 @@ class DependencyManifestTest(unittest.TestCase):
         self.assertIn("netgen-lvs", channel.apt_packages)
         self.assertIn("~/tt-pdk/ciel", channel.pdk_search_roots)
         self.assertIn("autoconf", channel.pdk_source_build_required_commands)
+        self.assertEqual(channel.pdk_managed_root, "~/pdk")
+        self.assertEqual(channel.pdk_bundle_install_root, "~/pdk")
+        self.assertEqual(channel.pdk_bundle_name, "tt-pdk-sky130a")
+        self.assertTrue(channel.pdk_bundle_enabled)
+        self.assertEqual(channel.pdk_bundle_version, "0.2.0-beta.2")
+        self.assertTrue(channel.pdk_bundle_asset_url.endswith("tt-pdk-sky130a_0.2.0-beta.2.tar.gz"))
 
     def test_unknown_channel_raises(self) -> None:
         manifest = DependencyManifest()
@@ -40,6 +46,17 @@ class DependencyManifestTest(unittest.TestCase):
       "bootstrap": {"apt_packages": ["git"]},
       "pdk": {
         "strategy": "external-managed",
+        "bundle": {
+          "enabled": true,
+          "name": "tt-pdk-sky130a",
+          "version": "0.1.0",
+          "install_root": "~/pdk",
+          "cache_root": "~/.cache/tt-pdk",
+          "minimum_free_gb": 12,
+          "asset_url": "https://example.invalid/tt-pdk-sky130a.tar.gz",
+          "asset_filename": "tt-pdk-sky130a.tar.gz",
+          "asset_sha256": "abc123"
+        },
         "preferred_sources": ["settings"],
         "search_roots": ["~/pdk"]
       }
@@ -52,7 +69,11 @@ class DependencyManifestTest(unittest.TestCase):
 
             manifest = DependencyManifest(manifest_path)
 
-        self.assertEqual(manifest.channel().apt_packages, ("git",))
+        channel = manifest.channel()
+        self.assertEqual(channel.apt_packages, ("git",))
+        self.assertTrue(channel.pdk_bundle_enabled)
+        self.assertEqual(channel.pdk_bundle_version, "0.1.0")
+        self.assertEqual(channel.pdk_bundle_asset_filename, "tt-pdk-sky130a.tar.gz")
 
 
 if __name__ == "__main__":

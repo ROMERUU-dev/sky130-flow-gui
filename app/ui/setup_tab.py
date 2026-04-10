@@ -92,6 +92,7 @@ class SetupTab(QWidget):
         self._pdk_candidates_available = False
         self._pdk_preflight = None
         self._pdk_source_preflight = None
+        self._pdk_bundle_preflight = None
         self._runner_action = ""
 
         self.validate_btn = QPushButton(pick(self.lang, "Validar entorno", "Validate environment"))
@@ -101,6 +102,7 @@ class SetupTab(QWidget):
         self.detect_pdk_btn = QPushButton(pick(self.lang, "Buscar PDK reutilizable", "Find reusable PDK"))
         self.use_pdk_btn = QPushButton(pick(self.lang, "Usar PDK seleccionado", "Use selected PDK"))
         self.install_managed_pdk_btn = QPushButton(pick(self.lang, "Instalar PDK gestionado", "Install managed PDK"))
+        self.install_bundle_pdk_btn = QPushButton(pick(self.lang, "Descargar bundle PDK", "Download PDK bundle"))
         self.check_source_build_btn = QPushButton(pick(self.lang, "Precheck build desde fuentes", "Source-build precheck"))
         self.build_from_sources_btn = QPushButton(pick(self.lang, "Build PDK desde fuentes", "Build PDK from sources"))
         self.pdk_candidate_combo = QComboBox()
@@ -109,6 +111,8 @@ class SetupTab(QWidget):
         self.pdk_candidate_summary.setWordWrap(True)
         self.pdk_preflight_summary = QLabel()
         self.pdk_preflight_summary.setWordWrap(True)
+        self.pdk_bundle_summary = QLabel()
+        self.pdk_bundle_summary.setWordWrap(True)
         self.pdk_source_preflight_summary = QLabel()
         self.pdk_source_preflight_summary.setWordWrap(True)
         self.prev_btn = QPushButton(pick(self.lang, "Atrás", "Back"))
@@ -357,10 +361,13 @@ class SetupTab(QWidget):
         actions.addWidget(self.detect_pdk_btn)
         actions.addWidget(self.use_pdk_btn)
         actions.addWidget(self.install_managed_pdk_btn)
+        actions.addWidget(self.install_bundle_pdk_btn)
         actions.addStretch(1)
         layout.addLayout(actions)
         layout.addWidget(QLabel(pick(self.lang, "Preflight de instalación gestionada", "Managed install preflight")))
         layout.addWidget(self.pdk_preflight_summary)
+        layout.addWidget(QLabel(pick(self.lang, "Bundle PDK", "PDK bundle")))
+        layout.addWidget(self.pdk_bundle_summary)
         source_actions = QHBoxLayout()
         source_actions.addWidget(self.check_source_build_btn)
         source_actions.addWidget(self.build_from_sources_btn)
@@ -451,6 +458,7 @@ class SetupTab(QWidget):
         self.detect_pdk_btn.clicked.connect(self.refresh_pdk_candidates)
         self.use_pdk_btn.clicked.connect(self.apply_selected_pdk_candidate)
         self.install_managed_pdk_btn.clicked.connect(self.install_managed_pdk)
+        self.install_bundle_pdk_btn.clicked.connect(self.install_bundle_pdk)
         self.check_source_build_btn.clicked.connect(self.refresh_pdk_source_preflight)
         self.build_from_sources_btn.clicked.connect(self.build_pdk_from_sources)
         self.pdk_candidate_combo.currentIndexChanged.connect(self._update_pdk_candidate_summary)
@@ -581,6 +589,7 @@ class SetupTab(QWidget):
         if self.pdk_candidate_combo.count() and self.pdk_candidate_combo.currentIndex() < 0:
             self.pdk_candidate_combo.setCurrentIndex(0)
         self._refresh_pdk_preflight()
+        self.refresh_pdk_bundle_preflight()
         self.refresh_pdk_source_preflight()
         self._update_pdk_candidate_summary()
         self._sync_action_gates()
@@ -660,6 +669,64 @@ class SetupTab(QWidget):
             )
         )
         self._sync_action_gates()
+
+    def refresh_pdk_bundle_preflight(self) -> None:
+        self._pdk_bundle_preflight = self.setup_mgr.pdk_bundle_preflight(self.settings)
+        summary = self._pdk_bundle_preflight
+        self.pdk_bundle_summary.setText(
+            pick(
+                self.lang,
+                f"Bundle: {summary.bundle_name}\n"
+                f"Versión: {summary.bundle_version or 'pendiente'}\n"
+                f"Instalación TT: {summary.target_sky130a}\n"
+                f"Cache: {summary.cache_root}\n"
+                f"Espacio libre: {summary.free_bytes / (1024 ** 3):.1f} GB\n"
+                f"Asset configurado: {'sí' if bool(summary.asset_url and summary.asset_filename) else 'no'}\n"
+                f"Listo para instalar: {'sí' if summary.ready else 'no'}",
+                f"Bundle: {summary.bundle_name}\n"
+                f"Version: {summary.bundle_version or 'pending'}\n"
+                f"TT install: {summary.target_sky130a}\n"
+                f"Cache: {summary.cache_root}\n"
+                f"Free space: {summary.free_bytes / (1024 ** 3):.1f} GB\n"
+                f"Asset configured: {'yes' if bool(summary.asset_url and summary.asset_filename) else 'no'}\n"
+                f"Ready to install: {'yes' if summary.ready else 'no'}",
+            )
+        )
+        self._sync_action_gates()
+
+    def install_bundle_pdk(self) -> None:
+        self.refresh_pdk_bundle_preflight()
+        summary = self._pdk_bundle_preflight
+        if summary is None or not summary.ready:
+            self.log.append(
+                pick(
+                    self.lang,
+                    "El bundle PDK todavía no está listo para descargarse e instalarse. Revisa el panel del bundle.\n",
+                    "The PDK bundle is not ready to download and install yet. Review the bundle panel.\n",
+                )
+            )
+            return
+        script_path = self.setup_mgr.pdk_bundle_install_script()
+        if not script_path.exists():
+            self.log.append(
+                pick(
+                    self.lang,
+                    f"Script del bundle no encontrado: {script_path}\n",
+                    f"Bundle script not found: {script_path}\n",
+                )
+            )
+            return
+        self._begin_activity(pick(self.lang, "Descargando bundle PDK...", "Downloading PDK bundle..."))
+        self.log.append(
+            pick(
+                self.lang,
+                "Descargando e instalando el bundle PDK en la ruta canónica del usuario. Esto puede tardar bastante.\n",
+                "Downloading and installing the PDK bundle into the user's canonical path. This can take a while.\n",
+            )
+        )
+        self.send_status.emit(pick(self.lang, "Instalando bundle PDK", "Installing PDK bundle"))
+        self._runner_action = "install_pdk_bundle"
+        self.runner.run(CommandSpec(command=self.setup_mgr.pdk_bundle_install_command()))
 
     def build_pdk_from_sources(self) -> None:
         self.refresh_pdk_source_preflight()
@@ -756,6 +823,22 @@ class SetupTab(QWidget):
             self._finish_activity(True, pick(self.lang, "Build de PDK listo", "PDK build ready"))
             return
 
+        if code == 0 and action == "install_pdk_bundle":
+            self.log.append(
+                pick(
+                    self.lang,
+                    "\nBundle PDK instalado. Refrescando detección y validación.\n",
+                    "\nPDK bundle installed. Refreshing detection and validation.\n",
+                )
+            )
+            self.send_status.emit(pick(self.lang, "Bundle PDK listo", "PDK bundle ready"))
+            self.refresh_detection()
+            self.refresh_validation()
+            self._apply_detected_defaults(automatic=True)
+            self._set_step(3)
+            self._finish_activity(True, pick(self.lang, "Bundle PDK listo", "PDK bundle ready"))
+            return
+
         if action == "build_pdk_sources":
             self.log.append(
                 pick(
@@ -767,6 +850,19 @@ class SetupTab(QWidget):
             self.send_status.emit(pick(self.lang, "Build de PDK falló", "PDK build failed"))
             self.refresh_pdk_source_preflight()
             self._finish_activity(False, pick(self.lang, "Build de PDK falló", "PDK build failed"))
+            return
+
+        if action == "install_pdk_bundle":
+            self.log.append(
+                pick(
+                    self.lang,
+                    f"\nLa instalación del bundle PDK falló (exit={code}, status={status}). Revisa el log y la configuración del asset.\n",
+                    f"\nPDK bundle installation failed (exit={code}, status={status}). Review the log and the asset configuration.\n",
+                )
+            )
+            self.send_status.emit(pick(self.lang, "Bundle PDK falló", "PDK bundle failed"))
+            self.refresh_pdk_bundle_preflight()
+            self._finish_activity(False, pick(self.lang, "Bundle PDK falló", "PDK bundle failed"))
             return
 
         if action == "install_tools":
@@ -938,6 +1034,7 @@ class SetupTab(QWidget):
             self.detect_pdk_btn.setEnabled(False)
             self.use_pdk_btn.setEnabled(False)
             self.install_managed_pdk_btn.setEnabled(False)
+            self.install_bundle_pdk_btn.setEnabled(False)
             self.check_source_build_btn.setEnabled(False)
             self.build_from_sources_btn.setEnabled(False)
             self.prev_btn.setEnabled(False)
@@ -963,6 +1060,11 @@ class SetupTab(QWidget):
             and self._pdk_preflight.enough_space
             and self._pdk_preflight.existing_status == "missing"
             and bool(self._pdk_preflight.selected_candidate)
+        )
+        self.install_bundle_pdk_btn.setEnabled(
+            self._verification_completed
+            and self._pdk_bundle_preflight is not None
+            and self._pdk_bundle_preflight.ready
         )
         self.check_source_build_btn.setEnabled(self._verification_completed)
         self.build_from_sources_btn.setEnabled(
@@ -1020,6 +1122,21 @@ class SetupTab(QWidget):
                     or not self._pdk_preflight.selected_candidate
                 ) else
                 "Install a managed PDK in the configured canonical path.",
+            )
+        )
+        self.install_bundle_pdk_btn.setToolTip(
+            pick(
+                self.lang,
+                "Primero verifica el sistema y configura un asset del bundle PDK en el manifiesto." if not self._verification_completed else
+                "El bundle PDK sigue bloqueado por configuración, espacio o porque ya existe el destino." if (
+                    self._pdk_bundle_preflight is None or not self._pdk_bundle_preflight.ready
+                ) else
+                "Descarga e instala un bundle `sky130A` ya preparado en `~/pdk`.",
+                "Verify the system first and configure a PDK bundle asset in the manifest." if not self._verification_completed else
+                "The PDK bundle is still blocked by configuration, space, or because the target already exists." if (
+                    self._pdk_bundle_preflight is None or not self._pdk_bundle_preflight.ready
+                ) else
+                "Download and install a prebuilt `sky130A` bundle into `~/pdk`.",
             )
         )
         self.build_from_sources_btn.setToolTip(

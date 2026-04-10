@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import shutil
+import sys
 
 from app.core.dependency_manifest import DependencyManifest
 from app.core.env_validator import EnvValidator, REQUIRED_PDK_SUBDIRS
@@ -68,6 +69,28 @@ class PdkSourceBuildPreflight:
     message: str
 
 
+@dataclass(frozen=True)
+class PdkBundlePreflight:
+    """Precheck summary for downloading and installing a TT-style PDK bundle."""
+
+    enabled: bool
+    bundle_name: str
+    bundle_version: str
+    install_root: str
+    target_sky130a: str
+    cache_root: str
+    asset_url: str
+    asset_filename: str
+    asset_sha256: str
+    minimum_free_bytes: int
+    free_bytes: int
+    enough_space: bool
+    target_available: bool
+    target_status: str
+    ready: bool
+    message: str
+
+
 class SetupManager:
     """Detect common installations and provide installer entrypoints."""
 
@@ -82,11 +105,17 @@ class SetupManager:
     def pdk_source_build_script(self) -> Path:
         return self.repo_root / "scripts" / "build_sky130_pdk_from_sources.sh"
 
+    def pdk_bundle_install_script(self) -> Path:
+        return self.repo_root / "scripts" / "install_tt_pdk_bundle.py"
+
     def installer_command(self) -> list[str]:
         return ["pkexec", "/bin/bash", str(self.installer_script()), self.manifest.default_channel()]
 
     def pdk_source_build_command(self) -> list[str]:
         return ["/bin/bash", str(self.pdk_source_build_script()), self.manifest.default_channel()]
+
+    def pdk_bundle_install_command(self) -> list[str]:
+        return [sys.executable, str(self.pdk_bundle_install_script()), self.manifest.default_channel()]
 
     def bootstrap_packages(self, channel: str | None = None) -> tuple[str, ...]:
         return self.manifest.channel(channel).apt_packages
@@ -308,6 +337,59 @@ class SetupManager:
             has_required_commands=has_required_commands,
             has_pinned_source=has_pinned_source,
             reusable_candidate_available=reusable_candidate_available,
+            ready=ready,
+            message="; ".join(message_parts),
+        )
+
+    def pdk_bundle_preflight(self, settings: AppSettings) -> PdkBundlePreflight:
+        policy = self.manifest.channel()
+        install_root = Path(policy.pdk_bundle_install_root).expanduser()
+        target_sky130a = install_root / "sky130A"
+        cache_root = Path(policy.pdk_bundle_cache_root).expanduser()
+        usage_root = install_root if install_root.exists() else install_root.parent if install_root.parent.exists() else Path.home()
+        free_bytes = shutil.disk_usage(usage_root).free
+        minimum_free_bytes = policy.pdk_bundle_minimum_free_gb * 1024 * 1024 * 1024
+        enough_space = free_bytes >= minimum_free_bytes
+        target_status = self._classify_sky130a_path(target_sky130a)
+        target_available = not os.path.lexists(target_sky130a)
+        has_asset = bool(policy.pdk_bundle_enabled and policy.pdk_bundle_asset_url and policy.pdk_bundle_asset_filename)
+        ready = has_asset and enough_space and target_available
+
+        message_parts = [
+            f"bundle={policy.pdk_bundle_name}",
+            f"install_root={install_root}",
+            f"target={target_sky130a}",
+            f"cache_root={cache_root}",
+            f"free_gb={free_bytes / (1024 ** 3):.1f}",
+        ]
+        if policy.pdk_bundle_version:
+            message_parts.append(f"version={policy.pdk_bundle_version}")
+        if not policy.pdk_bundle_enabled:
+            message_parts.append("bundle_disabled")
+        if not policy.pdk_bundle_asset_url:
+            message_parts.append("missing_asset_url")
+        if not policy.pdk_bundle_asset_filename:
+            message_parts.append("missing_asset_filename")
+        if not enough_space:
+            message_parts.append(f"requires_at_least={policy.pdk_bundle_minimum_free_gb}GB")
+        if not target_available:
+            message_parts.append(f"target_status={target_status}")
+
+        return PdkBundlePreflight(
+            enabled=policy.pdk_bundle_enabled,
+            bundle_name=policy.pdk_bundle_name,
+            bundle_version=policy.pdk_bundle_version,
+            install_root=str(install_root),
+            target_sky130a=str(target_sky130a),
+            cache_root=str(cache_root),
+            asset_url=policy.pdk_bundle_asset_url,
+            asset_filename=policy.pdk_bundle_asset_filename,
+            asset_sha256=policy.pdk_bundle_asset_sha256,
+            minimum_free_bytes=minimum_free_bytes,
+            free_bytes=free_bytes,
+            enough_space=enough_space,
+            target_available=target_available,
+            target_status=target_status,
             ready=ready,
             message="; ".join(message_parts),
         )

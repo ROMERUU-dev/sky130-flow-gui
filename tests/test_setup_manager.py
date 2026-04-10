@@ -171,6 +171,64 @@ class SetupManagerTest(unittest.TestCase):
         self.assertEqual(summary.missing_commands, ("autoconf", "tcsh"))
         self.assertTrue(summary.reusable_candidate_available)
 
+    def test_pdk_bundle_preflight_reports_disabled_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manager = SetupManager()
+            with mock.patch.object(
+                manager.manifest,
+                "channel",
+                return_value=SimpleNamespace(
+                    pdk_bundle_enabled=False,
+                    pdk_bundle_name="tt-pdk-sky130a",
+                    pdk_bundle_version="",
+                    pdk_bundle_install_root=str(root / "pdk"),
+                    pdk_bundle_cache_root=str(root / ".cache" / "pdk"),
+                    pdk_bundle_minimum_free_gb=10,
+                    pdk_bundle_asset_url="",
+                    pdk_bundle_asset_filename="",
+                    pdk_bundle_asset_sha256="",
+                ),
+            ), mock.patch("shutil.disk_usage", return_value=SimpleNamespace(free=40 * 1024**3)):
+                summary = manager.pdk_bundle_preflight(AppSettings())
+
+        self.assertFalse(summary.ready)
+        self.assertFalse(summary.enabled)
+        self.assertEqual(summary.target_status, "missing")
+
+    def test_pdk_bundle_preflight_is_ready_when_asset_and_space_are_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manager = SetupManager()
+            with mock.patch.object(
+                manager.manifest,
+                "channel",
+                return_value=SimpleNamespace(
+                    pdk_bundle_enabled=True,
+                    pdk_bundle_name="tt-pdk-sky130a",
+                    pdk_bundle_version="0.1.0",
+                    pdk_bundle_install_root=str(root / "pdk"),
+                    pdk_bundle_cache_root=str(root / ".cache" / "pdk"),
+                    pdk_bundle_minimum_free_gb=10,
+                    pdk_bundle_asset_url="https://example.invalid/tt-pdk-sky130a.tar.gz",
+                    pdk_bundle_asset_filename="tt-pdk-sky130a.tar.gz",
+                    pdk_bundle_asset_sha256="deadbeef",
+                ),
+            ), mock.patch("shutil.disk_usage", return_value=SimpleNamespace(free=40 * 1024**3)):
+                summary = manager.pdk_bundle_preflight(AppSettings())
+
+        self.assertTrue(summary.ready)
+        self.assertEqual(summary.target_sky130a, str((root / "pdk" / "sky130A")))
+        self.assertEqual(summary.bundle_name, "tt-pdk-sky130a")
+
+    def test_pdk_bundle_install_command_uses_current_python(self) -> None:
+        manager = SetupManager()
+
+        command = manager.pdk_bundle_install_command()
+
+        self.assertEqual(command[0], sys.executable)
+        self.assertTrue(command[1].endswith("scripts/install_tt_pdk_bundle.py"))
+
 
 if __name__ == "__main__":
     unittest.main()

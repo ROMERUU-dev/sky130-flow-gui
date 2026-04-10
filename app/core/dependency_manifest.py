@@ -24,6 +24,15 @@ class ChannelPolicy:
     pdk_source_build_open_pdks_repo: str
     pdk_source_build_open_pdks_ref: str
     pdk_source_build_configure_args: tuple[str, ...]
+    pdk_bundle_enabled: bool
+    pdk_bundle_name: str
+    pdk_bundle_version: str
+    pdk_bundle_install_root: str
+    pdk_bundle_cache_root: str
+    pdk_bundle_minimum_free_gb: int
+    pdk_bundle_asset_url: str
+    pdk_bundle_asset_filename: str
+    pdk_bundle_asset_sha256: str
     pdk_preferred_sources: tuple[str, ...]
     pdk_search_roots: tuple[str, ...]
 
@@ -64,6 +73,15 @@ class DependencyManifest:
             pdk_source_build_open_pdks_repo=str(pdk.get("source_build_open_pdks_repo", "")),
             pdk_source_build_open_pdks_ref=str(pdk.get("source_build_open_pdks_ref", "")),
             pdk_source_build_configure_args=tuple(str(item) for item in pdk.get("source_build_configure_args", [])),
+            pdk_bundle_enabled=bool(pdk.get("bundle", {}).get("enabled", False)),
+            pdk_bundle_name=str(pdk.get("bundle", {}).get("name", "tt-pdk-sky130a")),
+            pdk_bundle_version=str(pdk.get("bundle", {}).get("version", "")),
+            pdk_bundle_install_root=str(pdk.get("bundle", {}).get("install_root", "~/tt-pdk")),
+            pdk_bundle_cache_root=str(pdk.get("bundle", {}).get("cache_root", "~/.cache/sky130-flow-gui/pdk")),
+            pdk_bundle_minimum_free_gb=int(pdk.get("bundle", {}).get("minimum_free_gb", 10)),
+            pdk_bundle_asset_url=str(pdk.get("bundle", {}).get("asset_url", "")),
+            pdk_bundle_asset_filename=str(pdk.get("bundle", {}).get("asset_filename", "")),
+            pdk_bundle_asset_sha256=str(pdk.get("bundle", {}).get("asset_sha256", "")),
             pdk_preferred_sources=tuple(str(item) for item in pdk.get("preferred_sources", [])),
             pdk_search_roots=tuple(str(item) for item in pdk.get("search_roots", [])),
         )
