@@ -34,6 +34,12 @@ class SetupTab(QWidget):
     settings_updated = Signal(object)
     send_status = Signal(str)
 
+    STEP_REVIEW = 0
+    STEP_PDK = 1
+    STEP_TOOLS = 2
+    STEP_APPLY = 3
+    STEP_VALIDATE = 4
+
     def __init__(self, settings: AppSettings) -> None:
         super().__init__()
         self.settings = settings
@@ -43,8 +49,8 @@ class SetupTab(QWidget):
         self.runner = CommandRunner()
         self._wizard_steps = [
             pick(self.lang, "1. Revisar sistema", "1. Review system"),
-            pick(self.lang, "2. Instalar tools", "2. Install tools"),
-            pick(self.lang, "3. Preparar PDK", "3. Prepare PDK"),
+            pick(self.lang, "2. Preparar PDK", "2. Prepare PDK"),
+            pick(self.lang, "3. Instalar tools", "3. Install tools"),
             pick(self.lang, "4. Aplicar rutas", "4. Apply paths"),
             pick(self.lang, "5. Validar", "5. Validate"),
         ]
@@ -191,8 +197,8 @@ class SetupTab(QWidget):
         layout.addLayout(nav)
 
         self.step_stack.addWidget(self._build_review_page())
-        self.step_stack.addWidget(self._build_install_page())
         self.step_stack.addWidget(self._build_pdk_page())
+        self.step_stack.addWidget(self._build_install_page())
         self.step_stack.addWidget(self._build_apply_page())
         self.step_stack.addWidget(self._build_validate_page())
 
@@ -616,7 +622,7 @@ class SetupTab(QWidget):
                     f"The detected PDK at {sky130a_path} was adopted.\n",
                 )
             )
-            self._set_step(3)
+            self._set_step(self.STEP_APPLY)
             self._finish_activity(True, pick(self.lang, "PDK listo para usar", "PDK ready to use"))
             return
         self._finish_activity(True, pick(self.lang, "El PDK ya estaba aplicado", "The PDK was already applied"))
@@ -637,7 +643,7 @@ class SetupTab(QWidget):
             self.send_status.emit(pick(self.lang, "PDK gestionado listo", "Managed PDK ready"))
             self.refresh_detection()
             self.refresh_validation()
-            self._set_step(3)
+            self._set_step(self.STEP_APPLY)
             self._finish_activity(True, pick(self.lang, "PDK gestionado instalado", "Managed PDK installed"))
             return
         self.log.append(pick(self.lang, f"{result.message}\n", f"{result.message}\n"))
@@ -787,7 +793,7 @@ class SetupTab(QWidget):
             )
         )
         self.send_status.emit(pick(self.lang, "Instalación en progreso", "Installation in progress"))
-        self._set_step(1)
+        self._set_step(self.STEP_TOOLS)
         self._runner_action = "install_tools"
         self.runner.run(CommandSpec(command=self.setup_mgr.installer_command()))
 
@@ -821,7 +827,7 @@ class SetupTab(QWidget):
             self.send_status.emit(pick(self.lang, "Build de PDK listo", "PDK build ready"))
             self.refresh_detection()
             self.refresh_validation()
-            self._set_step(3)
+            self._set_step(self.STEP_APPLY)
             self._finish_activity(True, pick(self.lang, "Build de PDK listo", "PDK build ready"))
             return
 
@@ -837,7 +843,7 @@ class SetupTab(QWidget):
             self.refresh_detection()
             self.refresh_validation()
             self._apply_detected_defaults(automatic=True)
-            self._set_step(3)
+            self._set_step(self.STEP_APPLY)
             self._finish_activity(True, pick(self.lang, "Bundle PDK listo", "PDK bundle ready"))
             return
 
@@ -909,7 +915,7 @@ class SetupTab(QWidget):
                     )
                 )
             self.send_status.emit(pick(self.lang, "Rutas detectadas aplicadas", "Detected paths applied"))
-            self._set_step(4)
+            self._set_step(self.STEP_VALIDATE)
             self._finish_activity(True, pick(self.lang, "Rutas aplicadas", "Paths applied"))
             return
 
