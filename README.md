@@ -67,11 +67,11 @@ Create `.venv` as your normal user. Do not create or repair the repository virtu
 
 If the GUI already opens on your machine, go to `⬢ Entorno / Setup` and follow the wizard.
 
-The Ubuntu bootstrap currently installs Ubuntu system packages only:
+The Ubuntu bootstrap installs Ubuntu system packages plus the official Magic `8.3.634` source release:
 
 - `xschem`
 - `ngspice`
-- `magic`
+- `magic` from apt as a baseline, then `/usr/local/bin/magic` built from the official `magic-8.3.634.tgz` release
 - `netgen-lvs` (accepted by the app as Netgen)
 - `klayout`
 - `python3`, `python3-pip`, `python3-venv`
@@ -86,6 +86,15 @@ python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
 ```
+
+Some current SKY130 PDK techfiles require a newer Magic revision than the one shipped by older Ubuntu apt repositories. The Setup Assistant handles this during a clean tool install. If you are repairing an existing machine manually, install the official Magic `8.3.634` source release:
+
+```bash
+bash scripts/install_magic_8_3_634_ubuntu.sh
+/usr/local/bin/magic -dnull -noconsole -version
+```
+
+Then set the Magic executable in Preferences to `/usr/local/bin/magic` if `which magic` still resolves to `/usr/bin/magic`.
 
 ## Ubuntu Environment Notes
 
@@ -104,8 +113,9 @@ The Setup Assistant can detect common installations and apply discovered paths a
 
 Important:
 
-- the tool bootstrap is implemented for Ubuntu/Debian-style systems using `apt`
+- the tool bootstrap is implemented for Ubuntu/Debian-style systems using `apt` plus the official Magic source release
 - installing apt packages does not install the SKY130 PDK automatically
+- older Ubuntu apt repositories may ship Magic revisions too old for current SKY130 techfiles; use `scripts/install_magic_8_3_634_ubuntu.sh` when the validator reports a Magic/PDK incompatibility
 - the validator looks for `sky130A` in `PDK_ROOT`, `/usr/local/share/pdk`, `/usr/share/pdk`, `~/pdk`, `~/.volare`, and `~/eda/pdk`
 - the app checks `sky130A/libs.tech/magic`, `netgen`, `klayout`, `ngspice`, and `xschem` separately, so an incomplete PDK is reported as incomplete rather than OK
 - a repository under `/opt` may be readable but not writable for the current user; in that case `.venv` creation is intentionally reported as a permissions problem

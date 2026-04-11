@@ -60,6 +60,17 @@ apt-get install -y "${APT_PACKAGES[@]}"
 echo
 echo "Package installation finished."
 echo
+echo "Installing official Magic 8.3.634 source release for current SKY130 techfiles..."
+MAGIC_INSTALLER="$REPO_ROOT/scripts/install_magic_8_3_634_ubuntu.sh"
+if [ ! -f "$MAGIC_INSTALLER" ]; then
+  echo "Magic source installer not found at $MAGIC_INSTALLER."
+  exit 1
+fi
+/bin/bash "$MAGIC_INSTALLER"
+
+echo
+echo "Magic source installation finished."
+echo
 echo "System bootstrap completed."
 echo "This script intentionally does NOT create or modify $REPO_ROOT/.venv."
 echo "Create the Python environment later as the normal user, for example:"

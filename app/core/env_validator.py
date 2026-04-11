@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes.util
 import os
 import pwd
+import re
 import shutil
 import subprocess
 from collections import OrderedDict
@@ -137,7 +138,7 @@ class EnvValidator:
             (name, self._detect_tool(name, getattr(settings.tool_paths, name, ""), lang))
             for name in ("xschem", "ngspice", "magic", "netgen", "klayout")
         )
-        pdk = self._detect_pdk(settings, lang)
+        pdk = self._detect_pdk(settings, lang, magic_version=tools["magic"].version)
         python_env = self._detect_python_environment(lang)
         gui_dependencies = self._detect_gui_dependencies(lang)
         recommendations = self._build_recommendations(tools, pdk, python_env, gui_dependencies, lang)
@@ -255,7 +256,7 @@ class EnvValidator:
             ),
         )
 
-    def _detect_pdk(self, settings: AppSettings, lang: str) -> PdkDiagnosis:
+    def _detect_pdk(self, settings: AppSettings, lang: str, magic_version: str = "") -> PdkDiagnosis:
         sky130a = self._find_sky130a(settings)
         if sky130a is None:
             return PdkDiagnosis(
@@ -273,20 +274,29 @@ class EnvValidator:
             for relative in REQUIRED_PDK_SUBDIRS.values()
             if not sky130a.joinpath(relative).exists()
         ]
-        status = "present" if not missing_subdirs else "incomplete"
-        message = (
-            pick(
-                lang,
-                f"PDK `sky130A` detectado en: {sky130a}",
-                f"`sky130A` PDK detected at: {sky130a}",
-            )
-            if status == "present"
-            else pick(
+        magic_requirement = self._detect_magic_tech_requirement(sky130a, magic_version)
+        if missing_subdirs:
+            status = "incomplete"
+            message = pick(
                 lang,
                 f"El PDK `sky130A` existe en {sky130a}, pero está incompleto. Faltan: {', '.join(missing_subdirs)}.",
                 f"The `sky130A` PDK exists at {sky130a}, but it is incomplete. Missing: {', '.join(missing_subdirs)}.",
             )
-        )
+        elif magic_requirement:
+            required, detected = magic_requirement
+            status = "incompatible"
+            message = pick(
+                lang,
+                f"El PDK `sky130A` requiere Magic {required} o superior, pero se detectó Magic {detected}. Actualiza Magic o usa un PDK compatible.",
+                f"The `sky130A` PDK requires Magic {required} or newer, but Magic {detected} was detected. Upgrade Magic or use a compatible PDK.",
+            )
+        else:
+            status = "present"
+            message = pick(
+                lang,
+                f"PDK `sky130A` detectado en: {sky130a}",
+                f"`sky130A` PDK detected at: {sky130a}",
+            )
         return PdkDiagnosis(
             found=True,
             status=status,
@@ -470,6 +480,14 @@ class EnvValidator:
                     "Complete `sky130A/libs.tech/*` or fix `PDK_ROOT` so the app uses a complete PDK.",
                 )
             )
+        elif pdk.status == "incompatible":
+            recommendations.append(
+                pick(
+                    lang,
+                    "Actualiza Magic para que cumpla la versión mínima declarada por `sky130A.tech`, o apunta la app a un PDK compatible con tu Magic instalado.",
+                    "Upgrade Magic so it meets the minimum version declared by `sky130A.tech`, or point the app to a PDK compatible with your installed Magic.",
+                )
+            )
         if python_env.problems:
             recommendations.append(
                 pick(
@@ -589,6 +607,42 @@ class EnvValidator:
             return False
         return result.returncode == 0 and result.stdout.strip() == "OK"
 
+    @classmethod
+    def _detect_magic_tech_requirement(cls, sky130a: Path, magic_version: str) -> tuple[str, str] | None:
+        techfile = sky130a / "libs.tech" / "magic" / "sky130A.tech"
+        if not techfile.is_file() or not magic_version:
+            return None
+        required_text = cls._read_magic_tech_required_version(techfile)
+        required = cls._parse_version_tuple(required_text)
+        detected = cls._parse_version_tuple(magic_version)
+        if required is None or detected is None:
+            return None
+        if detected < required:
+            return (required_text, ".".join(str(part) for part in detected))
+        return None
+
+    @staticmethod
+    def _read_magic_tech_required_version(techfile: Path) -> str:
+        try:
+            text = techfile.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+        for line in text.splitlines()[:80]:
+            match = re.search(r"\bversion\s+([0-9]+(?:\.[0-9]+){1,3})\b", line, flags=re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return ""
+
+    @staticmethod
+    def _parse_version_tuple(text: str) -> tuple[int, ...] | None:
+        revision_match = re.search(r"\bMagic\s+([0-9]+)\.([0-9]+)\s+revision\s+([0-9]+)\b", text, flags=re.IGNORECASE)
+        if revision_match:
+            return tuple(int(part) for part in revision_match.groups())
+        match = re.search(r"\b([0-9]+(?:\.[0-9]+){1,3})\b", text)
+        if not match:
+            return None
+        return tuple(int(part) for part in match.group(1).split("."))
+
     @staticmethod
     def _query_version(logical_name: str, executable: str) -> str:
         for args in TOOL_VERSION_ARGS.get(logical_name, (("--version",),)):
@@ -663,6 +717,7 @@ class EnvValidator:
     def _pdk_status_label(status: str, lang: str) -> str:
         mapping = {
             "present": pick(lang, "PRESENTE", "PRESENT"),
+            "incompatible": pick(lang, "INCOMPATIBLE", "INCOMPATIBLE"),
             "incomplete": pick(lang, "INCOMPLETO", "INCOMPLETE"),
             "missing": pick(lang, "AUSENTE", "ABSENT"),
         }

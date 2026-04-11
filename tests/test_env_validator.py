@@ -64,6 +64,35 @@ class EnvValidatorTest(unittest.TestCase):
         self.assertEqual(pdk.status, "incomplete")
         self.assertIn("libs.tech/netgen", pdk.missing_subdirs)
 
+    def test_pdk_reports_magic_techfile_version_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sky130a = Path(tmpdir) / "pdk" / "sky130A"
+            for relative in (
+                "libs.tech/magic",
+                "libs.tech/netgen",
+                "libs.tech/klayout",
+                "libs.tech/ngspice",
+                "libs.tech/xschem",
+            ):
+                (sky130a / relative).mkdir(parents=True)
+            (sky130a / "libs.tech" / "magic" / "sky130A.tech").write_text(
+                "tech\nversion 8.3.411\n",
+                encoding="utf-8",
+            )
+            self.settings.pdk_paths.pdk_root = str(Path(tmpdir) / "pdk")
+
+            with mock.patch.dict(os.environ, {}, clear=True):
+                pdk = self.validator._detect_pdk(
+                    self.settings,
+                    lang="en",
+                    magic_version="Magic 8.3 revision 105 - Compiled on Mon, 06 Dec 2021 22:32:27 +0200.",
+                )
+
+        self.assertTrue(pdk.found)
+        self.assertEqual(pdk.status, "incompatible")
+        self.assertIn("requires Magic 8.3.411", pdk.message)
+        self.assertIn("Magic 8.3.105 was detected", pdk.message)
+
     def test_root_owned_venv_problem_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_root = Path(tmpdir)

@@ -314,8 +314,8 @@ class SetupTab(QWidget):
             self._page_hint(
                 pick(
                     self.lang,
-                    "Este paso instala paquetes del sistema para Ubuntu: herramientas EDA base y librerías Qt/X11. No crea `.venv` ni toca el entorno Python del usuario.",
-                    "This step installs Ubuntu system packages: base EDA tools and Qt/X11 runtime libraries. It does not create `.venv` or touch the user-owned Python environment.",
+                    "Este paso instala paquetes del sistema para Ubuntu y compila Magic 8.3.634 desde la fuente oficial para SKY130. No crea `.venv` ni toca el entorno Python del usuario.",
+                    "This step installs Ubuntu system packages and builds Magic 8.3.634 from the official source release for SKY130. It does not create `.venv` or touch the user-owned Python environment.",
                 )
             )
         )
@@ -788,8 +788,8 @@ class SetupTab(QWidget):
         self.log.append(
             pick(
                 self.lang,
-                "Lanzando bootstrap de Ubuntu con privilegios. Este paso solo instala paquetes del sistema; `.venv` debe prepararse después como usuario normal.\n",
-                "Launching Ubuntu bootstrap with privileges. This step only installs system packages; `.venv` must be prepared afterwards as the normal user.\n",
+                "Lanzando bootstrap de Ubuntu con privilegios. Este paso instala paquetes del sistema y Magic 8.3.634; `.venv` debe prepararse después como usuario normal.\n",
+                "Launching Ubuntu bootstrap with privileges. This step installs system packages and Magic 8.3.634; `.venv` must be prepared afterwards as the normal user.\n",
             )
         )
         self.send_status.emit(pick(self.lang, "Instalación en progreso", "Installation in progress"))
