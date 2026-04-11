@@ -405,6 +405,10 @@ def _is_valid_node_name(token: str) -> bool:
 
 
 def _auto_wrapper_lines(source_text: str, preferred_subckt: str, wrapper_options: dict[str, object]) -> list[str]:
+    wrapper_mode = str(wrapper_options.get("wrapper_mode", "auto")).strip().lower()
+    if wrapper_mode in {"none", "off", "disabled"}:
+        return []
+
     if _has_top_level_instances(source_text):
         return []
 
@@ -416,7 +420,7 @@ def _auto_wrapper_lines(source_text: str, preferred_subckt: str, wrapper_options
     if not selected_name or not selected_pins:
         return []
 
-    if _looks_like_tiny_tapeout_wrapper(selected_name, selected_pins):
+    if wrapper_mode in {"auto", "tiny_tapeout"} and _looks_like_tiny_tapeout_wrapper(selected_name, selected_pins):
         return _tiny_tapeout_wrapper_lines(selected_name, selected_pins, wrapper_options)
 
     lines = [
@@ -537,6 +541,12 @@ def _tiny_tapeout_wrapper_lines(subckt_name: str, pins: list[str], wrapper_optio
     load_mode = str(wrapper_options.get("tiny_tapeout_load_mode", "cap")).strip().lower()
     load_cap_value = str(wrapper_options.get("tiny_tapeout_load_cap_value", "10f")).strip() or "10f"
     load_res_value = str(wrapper_options.get("tiny_tapeout_load_res_value", "1k")).strip() or "1k"
+    pin_config = wrapper_options.get("tiny_tapeout_pin_config", {})
+    if not isinstance(pin_config, dict):
+        pin_config = {}
+    clock_config = wrapper_options.get("tiny_tapeout_clock", {})
+    if not isinstance(clock_config, dict):
+        clock_config = {}
     lines = [
         "",
         f"* Auto-generated Tiny Tapeout post-layout wrapper for {subckt_name}",
@@ -548,14 +558,14 @@ def _tiny_tapeout_wrapper_lines(subckt_name: str, pins: list[str], wrapper_optio
 
     added_sources: set[str] = set()
     for pin in pins:
-        source_line = _tiny_tapeout_pin_source(pin)
+        source_line = _tiny_tapeout_pin_source(pin, pin_config, clock_config)
         if source_line and source_line not in added_sources:
             added_sources.add(source_line)
             lines.append(source_line)
 
     if load_mode not in {"none", "off", "disabled"}:
         for pin in pins:
-            for load_line in _tiny_tapeout_load(pin, load_mode, load_cap_value, load_res_value):
+            for load_line in _tiny_tapeout_load(pin, load_mode, load_cap_value, load_res_value, pin_config):
                 lines.append(load_line)
 
     instance_nodes = " ".join(pins)
@@ -569,15 +579,44 @@ def _tiny_tapeout_wrapper_lines(subckt_name: str, pins: list[str], wrapper_optio
     return lines
 
 
-def _tiny_tapeout_pin_source(pin: str) -> str:
+def _tiny_tapeout_pin_source(pin: str, pin_config: dict[str, object], clock_config: dict[str, object]) -> str:
     normalized = pin.strip().lower()
     source_name = re.sub(r"[^a-zA-Z0-9_]+", "_", pin).strip("_") or "pin"
+    config = _pin_config(pin_config, normalized)
+    role = str(config.get("role", "")).strip().lower()
+
+    if role in {"hiz", "hi_z", "output", "observe", "measurement"}:
+        return ""
+    if role in {"ground", "low", "zero"}:
+        return f"V{source_name} {pin} 0 0"
+    if role in {"high", "one"}:
+        return f"V{source_name} {pin} 0 1.8"
+    if role in {"dc", "input_dc", "bias"}:
+        value = str(config.get("value", "0")).strip() or "0"
+        return f"V{source_name} {pin} 0 {value}"
+    if role in {"sine", "sin", "input_sine"}:
+        offset = str(config.get("offset", config.get("value", "0"))).strip() or "0"
+        amplitude = str(config.get("amplitude", "100m")).strip() or "100m"
+        frequency = str(config.get("frequency", "1Meg")).strip() or "1Meg"
+        return f"V{source_name} {pin} 0 SIN({offset} {amplitude} {frequency})"
 
     if normalized == "vdpwr":
         return f"V{source_name} {pin} 0 1.8"
     if normalized in {"vgnd", "vnb", "vpb", "vsub", "vsubs"}:
         return f"V{source_name} {pin} 0 0"
     if normalized == "clk":
+        mode = str(clock_config.get("mode", "low")).strip().lower()
+        if mode in {"pulse", "clock"}:
+            high = str(clock_config.get("high_time", "5n")).strip() or "5n"
+            period = str(clock_config.get("period", "10n")).strip() or "10n"
+            delay = str(clock_config.get("delay", "0")).strip() or "0"
+            rise = str(clock_config.get("rise", "100p")).strip() or "100p"
+            fall = str(clock_config.get("fall", "100p")).strip() or "100p"
+            vlow = str(clock_config.get("vlow", "0")).strip() or "0"
+            vhigh = str(clock_config.get("vhigh", "1.8")).strip() or "1.8"
+            return f"V{source_name} {pin} 0 PULSE({vlow} {vhigh} {delay} {rise} {fall} {high} {period})"
+        if mode in {"high", "one"}:
+            return f"V{source_name} {pin} 0 1.8"
         return f"V{source_name} {pin} 0 0"
     if normalized in {"ena", "en", "enable", "rst_n", "reset_n"}:
         return f"V{source_name} {pin} 0 1.8"
@@ -591,12 +630,29 @@ def _tiny_tapeout_pin_source(pin: str) -> str:
     return ""
 
 
-def _tiny_tapeout_load(pin: str, load_mode: str, cap_value: str, res_value: str) -> list[str]:
+def _tiny_tapeout_load(
+    pin: str,
+    load_mode: str,
+    cap_value: str,
+    res_value: str,
+    pin_config: dict[str, object],
+) -> list[str]:
     normalized = pin.strip().lower()
     base_name = re.sub(r"[^a-zA-Z0-9_]+", "_", pin).strip("_") or "node"
-    eligible = normalized.startswith("uo_out[") or normalized.startswith("uio_out[") or normalized.startswith("osc_")
+    config = _pin_config(pin_config, normalized)
+    role = str(config.get("role", "")).strip().lower()
+    eligible = (
+        normalized.startswith("uo_out[")
+        or normalized.startswith("uio_out[")
+        or normalized.startswith("osc_")
+        or (normalized.startswith("ua[") and role in {"output", "observe", "measurement"})
+    )
     if not eligible:
         return []
+
+    load_mode = str(config.get("load_mode", load_mode)).strip().lower() or load_mode
+    cap_value = str(config.get("load_cap", cap_value)).strip() or cap_value
+    res_value = str(config.get("load_res", res_value)).strip() or res_value
 
     if load_mode in {"cap", "c"}:
         return [f"CLOAD_{base_name} {pin} 0 {cap_value}"]
@@ -609,6 +665,11 @@ def _tiny_tapeout_load(pin: str, load_mode: str, cap_value: str, res_value: str)
         ]
 
     return []
+
+
+def _pin_config(pin_config: dict[str, object], normalized_pin: str) -> dict[str, object]:
+    config = pin_config.get(normalized_pin) or pin_config.get(normalized_pin.upper()) or {}
+    return config if isinstance(config, dict) else {}
 
 
 def _tiny_tapeout_initial_conditions(pins: list[str]) -> str:

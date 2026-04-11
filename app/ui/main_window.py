@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -13,6 +17,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QStatusBar,
     QTabWidget,
     QToolBar,
@@ -50,6 +55,7 @@ class MainWindow(QMainWindow):
         self.output_manager = OutputManager()
         self.project_mgr = ProjectManager(self.output_manager)
         self._current_project = self.app_settings.last_project
+        self._startup_project_prompt_shown = False
 
         self.root = QWidget()
         self.root_layout = QHBoxLayout(self.root)
@@ -84,6 +90,7 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._apply_window_style()
         self._wire_navigation()
+        QTimer.singleShot(250, self._prompt_for_project_on_start)
 
     def _build_tabs(self) -> None:
         self.project_tab = ProjectTab(self.project_mgr, self.app_settings.recent_projects, self.app_settings.language)
@@ -97,6 +104,7 @@ class MainWindow(QMainWindow):
         self.pref_tab = PreferencesTab(self.app_settings)
 
         self.ext_tab.netlist_ready.connect(self._receive_extracted_netlist)
+        self.project_tab.project_changed.connect(lambda _path: self.sim_tab.load_project_profile())
         self.pref_tab.settings_updated.connect(self._on_settings_updated)
 
         for tab in [self.sim_tab, self.lvs_tab, self.ext_tab, self.ant_tab, self.em_tab, self.pref_tab]:
@@ -330,6 +338,83 @@ class MainWindow(QMainWindow):
     def _wire_navigation(self) -> None:
         self.sidebar.currentRowChanged.connect(self.tabs.setCurrentIndex)
         self.tabs.currentChanged.connect(self.sidebar.setCurrentRow)
+
+    def _prompt_for_project_on_start(self) -> None:
+        if self._startup_project_prompt_shown:
+            return
+        self._startup_project_prompt_shown = True
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(pick(self.app_settings.language, "Selecciona proyecto", "Select project"))
+        layout = QVBoxLayout(dialog)
+        title = QLabel(
+            pick(
+                self.app_settings.language,
+                "¿En qué proyecto vas a trabajar?",
+                "Which project are you working on?",
+            )
+        )
+        title.setStyleSheet("font-size: 18px; font-weight: 800; color: #2563eb;")
+        layout.addWidget(title)
+
+        current_text = self._current_project or pick(self.app_settings.language, "Workspace local sin proyecto", "Local workspace without a project")
+        current_label = QLabel(f"{pick(self.app_settings.language, 'Actual', 'Current')}: {current_text}")
+        current_label.setWordWrap(True)
+        layout.addWidget(current_label)
+
+        recent = QListWidget()
+        for path in self.app_settings.recent_projects:
+            recent.addItem(path)
+        layout.addWidget(recent)
+
+        actions = QHBoxLayout()
+        open_btn = QPushButton(pick(self.app_settings.language, "Abrir repo existente", "Open existing repo"))
+        create_btn = QPushButton(pick(self.app_settings.language, "Crear proyecto Tiny Tapeout", "Create Tiny Tapeout project"))
+        workspace_btn = QPushButton(pick(self.app_settings.language, "Usar workspace", "Use workspace"))
+        actions.addWidget(open_btn)
+        actions.addWidget(create_btn)
+        actions.addWidget(workspace_btn)
+        layout.addLayout(actions)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText(pick(self.app_settings.language, "Continuar", "Continue"))
+        buttons.button(QDialogButtonBox.Cancel).setText(pick(self.app_settings.language, "Cerrar", "Close"))
+        layout.addWidget(buttons)
+
+        def select_recent() -> None:
+            item = recent.currentItem()
+            if item:
+                self.project_tab.set_project(item.text())
+                dialog.accept()
+
+        def open_existing() -> None:
+            path = QFileDialog.getExistingDirectory(self, pick(self.app_settings.language, "Selecciona repo/proyecto", "Select repo/project"))
+            if path:
+                self.project_tab.set_project(path)
+                dialog.accept()
+
+        def create_project() -> None:
+            dialog.accept()
+            self.tabs.setCurrentWidget(self.project_tab)
+            QTimer.singleShot(0, self.project_tab.create_tiny_tapeout_project)
+
+        def use_workspace() -> None:
+            self.project_mgr.current_project = None
+            self._current_project = ""
+            self.app_settings.last_project = ""
+            self.settings_mgr.save(self.app_settings)
+            self.project_tab._refresh_context_label()
+            self.project_tab._index_files()
+            self.sim_tab.load_project_profile()
+            dialog.accept()
+
+        recent.itemDoubleClicked.connect(lambda _item: select_recent())
+        open_btn.clicked.connect(open_existing)
+        create_btn.clicked.connect(create_project)
+        workspace_btn.clicked.connect(use_workspace)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        dialog.exec()
 
     def _open_xschem(self) -> None:
         launch = XschemLaunchBuilder(self.app_settings).build(self._current_project)

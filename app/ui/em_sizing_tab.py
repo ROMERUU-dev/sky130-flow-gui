@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -77,9 +79,22 @@ class EmSizingTab(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        layout.addWidget(scroll)
+
+        page = QWidget()
+        page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(12, 12, 12, 12)
+        page_layout.setSpacing(12)
 
         file_group = QGroupBox(pick(self.lang, "Archivo de corrientes", "Current Waveform File"))
         file_form = QFormLayout(file_group)
+        file_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
         file_row = QHBoxLayout()
         file_row.addWidget(self.file_edit)
@@ -97,6 +112,7 @@ class EmSizingTab(QWidget):
 
         controls_group = QGroupBox(pick(self.lang, "Reglas y criterio", "Rules and Design Metric"))
         controls_form = QFormLayout(controls_group)
+        controls_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         controls_form.addRow(pick(self.lang, "Perfil EM", "EM Profile"), self.profile_combo)
         controls_form.addRow(pick(self.lang, "Modo de proyecto", "Project Mode"), self.project_mode_combo)
         controls_form.addRow("", self.allow_metal5_checkbox)
@@ -105,15 +121,15 @@ class EmSizingTab(QWidget):
         controls_form.addRow(pick(self.lang, "Tipo de vía", "Via Type"), self.via_combo)
         controls_form.addRow(pick(self.lang, "Factor de margen", "Margin Factor"), self.margin_spin)
 
-        top_row = QHBoxLayout()
-        top_row.addWidget(file_group, 3)
-        top_row.addWidget(controls_group, 2)
-        layout.addLayout(top_row)
+        page_layout.addWidget(file_group)
+        page_layout.addWidget(controls_group)
 
         self.results_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.results_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.results_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.results_table.setAlternatingRowColors(True)
+        self.results_table.setMinimumWidth(0)
+        self.results_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.results_table.setHorizontalHeaderLabels(
             [
                 pick(self.lang, "Branch", "Branch"),
@@ -169,15 +185,18 @@ class EmSizingTab(QWidget):
         splitter = QSplitter(Qt.Vertical)
         upper = QWidget()
         upper_layout = QVBoxLayout(upper)
+        upper_layout.setContentsMargins(0, 0, 0, 0)
         upper_layout.addWidget(self.results_table)
         lower = QWidget()
-        lower_layout = QHBoxLayout(lower)
-        lower_layout.addWidget(detail_group, 3)
-        lower_layout.addWidget(warnings_group, 2)
+        lower_layout = QVBoxLayout(lower)
+        lower_layout.setContentsMargins(0, 0, 0, 0)
+        lower_layout.addWidget(detail_group)
+        lower_layout.addWidget(warnings_group)
         splitter.addWidget(upper)
         splitter.addWidget(lower)
         splitter.setSizes([520, 280])
-        layout.addWidget(splitter, 1)
+        page_layout.addWidget(splitter, 1)
+        scroll.setWidget(page)
 
         browse_btn.clicked.connect(self._pick_file)
         reload_btn.clicked.connect(self.reload_current_file)

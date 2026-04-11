@@ -133,6 +133,84 @@ class PostLayoutFlowTest(unittest.TestCase):
         self.assertIn("CLOAD_uo_out_0 uo_out[0]__load 0 25f", generated)
         self.assertNotIn("CLOAD_uo_out_0 uo_out[0] 0 25f", generated)
 
+    def test_generic_wrapper_mode_does_not_apply_tiny_tapeout_loads(self) -> None:
+        source = "\n".join(
+            [
+                ".subckt tt_um_demo clk ena rst_n ui_in[0] uo_out[0] VDPWR VGND",
+                "R1 uo_out[0] VGND 1k",
+                ".ends",
+            ]
+        )
+
+        generated = build_generated_netlist(
+            source_text=source,
+            analysis_type="Transient",
+            analysis_params={"tran_step": "1n", "tran_stop": "1u", "save_mode": "All signals"},
+            save_points=[],
+            extra_directives="",
+            preferred_subckt="tt_um_demo",
+            wrapper_options={"wrapper_mode": "generic"},
+        )
+
+        self.assertIn("* Auto-generated wrapper for extracted subckt tt_um_demo", generated)
+        self.assertIn("Xdut clk ena rst_n ui_in[0] uo_out[0] VDPWR VGND tt_um_demo", generated)
+        self.assertNotIn("Auto-generated Tiny Tapeout post-layout wrapper", generated)
+        self.assertNotIn("CLOAD_uo_out_0", generated)
+
+    def test_wrapper_mode_none_only_injects_analysis_directives(self) -> None:
+        source = ".subckt tt_um_demo clk VDPWR VGND\nR1 clk VGND 1k\n.ends\n"
+
+        generated = build_generated_netlist(
+            source_text=source,
+            analysis_type="Transient",
+            analysis_params={"tran_step": "1n", "tran_stop": "1u", "save_mode": "All signals"},
+            save_points=[],
+            extra_directives="",
+            preferred_subckt="tt_um_demo",
+            wrapper_options={"wrapper_mode": "none"},
+        )
+
+        self.assertNotIn("Xdut", generated)
+        self.assertNotIn("Auto-generated wrapper", generated)
+        self.assertIn(".tran 1n 1u", generated)
+
+    def test_tiny_tapeout_wrapper_uses_configured_clock_and_analog_pin_roles(self) -> None:
+        source = "\n".join(
+            [
+                ".subckt tt_um_demo clk ena rst_n ua[0] ua[1] uo_out[0] VDPWR VGND",
+                "R1 uo_out[0] VGND 1k",
+                ".ends",
+            ]
+        )
+
+        generated = build_generated_netlist(
+            source_text=source,
+            analysis_type="Transient",
+            analysis_params={"tran_step": "1n", "tran_stop": "1u", "save_mode": "All signals"},
+            save_points=[],
+            extra_directives="",
+            preferred_subckt="tt_um_demo",
+            wrapper_options={
+                "wrapper_mode": "tiny_tapeout",
+                "tiny_tapeout_clock": {
+                    "mode": "pulse",
+                    "period": "20n",
+                    "high_time": "8n",
+                    "rise": "50p",
+                    "fall": "60p",
+                    "delay": "2n",
+                },
+                "tiny_tapeout_pin_config": {
+                    "ua[0]": {"role": "hiz"},
+                    "ua[1]": {"role": "dc", "value": "0.75"},
+                },
+            },
+        )
+
+        self.assertIn("Vclk clk 0 PULSE(0 1.8 2n 50p 60p 8n 20n)", generated)
+        self.assertNotIn("Vua_0 ua[0]", generated)
+        self.assertIn("Vua_1 ua[1] 0 0.75", generated)
+
     def test_extracted_sky130_netlist_gets_model_lib(self) -> None:
         source = ".subckt tt_um_demo VDPWR VGND\nX1 a b sky130_fd_sc_hd__inv_1\n.ends\n"
         updated = ensure_sky130_model_lib(source, "/pdk/sky130A")

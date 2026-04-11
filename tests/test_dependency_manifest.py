@@ -24,15 +24,15 @@ class DependencyManifestTest(unittest.TestCase):
         self.assertEqual(channel.pdk_bundle_install_root, "~/pdk")
         self.assertEqual(channel.pdk_bundle_name, "tt-pdk-sky130a")
         self.assertTrue(channel.pdk_bundle_enabled)
-        self.assertEqual(channel.pdk_bundle_version, "0.2.0-beta.7")
+        self.assertEqual(channel.pdk_bundle_version, "0.2.0-beta.9")
         self.assertEqual(
             channel.pdk_bundle_asset_url,
-            "https://github.com/ROMERUU-dev/sky130-flow-gui/releases/download/v0.2.0-beta.7/tt-pdk-sky130a_0.2.0-beta.7.tar.gz",
+            "https://github.com/ROMERUU-dev/sky130-flow-gui/releases/download/v0.2.0-beta.9/tt-pdk-sky130a_0.2.0-beta.9.tar.gz",
         )
-        self.assertEqual(channel.pdk_bundle_asset_filename, "tt-pdk-sky130a_0.2.0-beta.7.tar.gz")
+        self.assertEqual(channel.pdk_bundle_asset_filename, "tt-pdk-sky130a_0.2.0-beta.9.tar.gz")
         self.assertEqual(
             channel.pdk_bundle_asset_sha256,
-            "984e86c673dfb6e551e59fcb3159c1f33e6345b4f9d7b29fdad78fb1f937ab81",
+            "25acfcdaace6e6b8ca0ca828407ecf1a896a1c0e04560465d2259cda8b9b4c24",
         )
 
     def test_unknown_channel_raises(self) -> None:

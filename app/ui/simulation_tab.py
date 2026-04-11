@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 import math
 from pathlib import Path
 
@@ -189,6 +190,20 @@ class SimulationTab(QWidget):
                 pick(self.lang, "Sólo probes seleccionados", "Selected probes only"),
             ]
         )
+        self.testbench_mode = QComboBox()
+        self.testbench_mode.addItem(
+            pick(self.lang, "Usar netlist como testbench completo", "Use netlist as complete testbench"),
+            "complete",
+        )
+        self.testbench_mode.addItem(
+            pick(self.lang, "Generar testbench temporal genérico", "Generate generic temporary testbench"),
+            "generic",
+        )
+        self.testbench_mode.addItem(
+            pick(self.lang, "Generar testbench Tiny Tapeout", "Generate Tiny Tapeout testbench"),
+            "tiny_tapeout",
+        )
+        self.testbench_mode.setCurrentIndex(2)
         self.corner = QComboBox()
         self.corner.addItems(["tt", "ss", "ff", "sf", "fs"])
         self.temp_c = QLineEdit()
@@ -202,6 +217,31 @@ class SimulationTab(QWidget):
         self.postlayout_load_mode.setCurrentIndex(1)
         self.postlayout_load_cap = QLineEdit("10f")
         self.postlayout_load_res = QLineEdit("1k")
+        self.tt_profile = QComboBox()
+        self.tt_profile.addItem(pick(self.lang, "Digital estándar", "Standard digital"), "digital")
+        self.tt_profile.addItem(pick(self.lang, "Analógico / mixed-signal", "Analog / mixed-signal"), "analog")
+        self.tt_profile.addItem("Custom", "custom")
+        self.tt_clock_mode = QComboBox()
+        self.tt_clock_mode.addItem(pick(self.lang, "Bajo fijo", "Fixed low"), "low")
+        self.tt_clock_mode.addItem(pick(self.lang, "Alto fijo", "Fixed high"), "high")
+        self.tt_clock_mode.addItem("PULSE", "pulse")
+        self.tt_clock_period = QLineEdit("10n")
+        self.tt_clock_high = QLineEdit("5n")
+        self.tt_clock_rise = QLineEdit("100p")
+        self.tt_clock_fall = QLineEdit("100p")
+        self.tt_clock_delay = QLineEdit("0")
+        self.tt_save_pins = QCheckBox(pick(self.lang, "Guardar pines Tiny Tapeout", "Save Tiny Tapeout pins"))
+        self.tt_save_pins.setChecked(True)
+        self.tt_save_currents = QCheckBox(pick(self.lang, "Guardar corrientes de fuentes generadas", "Save generated source currents"))
+        self.tt_analog_table = QTableWidget(8, 4)
+        self.tt_analog_table.setHorizontalHeaderLabels(
+            [
+                pick(self.lang, "Pin", "Pin"),
+                pick(self.lang, "Rol", "Role"),
+                pick(self.lang, "Valor / offset", "Value / offset"),
+                pick(self.lang, "Carga", "Load"),
+            ]
+        )
         self.spectrum_mode = QComboBox()
         self.spectrum_mode.addItems(
             [
@@ -267,6 +307,7 @@ class SimulationTab(QWidget):
         self.visual_section = None
         self.measurements_section = None
         self.spectrum_section = None
+        self._loading_project_profile = False
 
         for control in (self.spectrum_x_scale, self.spectrum_y_scale):
             control.setDecimals(2)
@@ -276,6 +317,7 @@ class SimulationTab(QWidget):
 
         self._build_ui()
         self._configure_combo_boxes()
+        self.load_project_profile()
         self._apply_visual_style()
         self._wire()
         self.refresh_history()
@@ -476,6 +518,7 @@ class SimulationTab(QWidget):
         basics.setHorizontalSpacing(16)
         basics.setVerticalSpacing(10)
         basics.addRow(pick(self.lang, "Tipo:", "Type:"), self.sim_type)
+        basics.addRow(pick(self.lang, "Modo de testbench:", "Testbench mode:"), self.testbench_mode)
         basics.addRow(pick(self.lang, "Modo de guardado:", "Save mode:"), self.save_mode)
         outer.addWidget(self._make_section_heading(pick(self.lang, "General", "General")))
         outer.addLayout(basics)
@@ -502,6 +545,29 @@ class SimulationTab(QWidget):
         postlayout_form.addRow(pick(self.lang, "Capacitancia:", "Capacitance:"), self.postlayout_load_cap)
         postlayout_form.addRow(pick(self.lang, "Resistencia serie:", "Series resistance:"), self.postlayout_load_res)
         postlayout_layout.addLayout(postlayout_form)
+        tt_form = QFormLayout()
+        tt_form.setHorizontalSpacing(16)
+        tt_form.setVerticalSpacing(10)
+        tt_form.addRow(pick(self.lang, "Perfil TT:", "TT profile:"), self.tt_profile)
+        tt_form.addRow(pick(self.lang, "Clock:", "Clock:"), self.tt_clock_mode)
+        tt_form.addRow(pick(self.lang, "Periodo clock:", "Clock period:"), self.tt_clock_period)
+        tt_form.addRow(pick(self.lang, "Tiempo alto:", "High time:"), self.tt_clock_high)
+        tt_form.addRow(pick(self.lang, "Rise/Fall:", "Rise/Fall:"), self._build_clock_edge_row())
+        tt_form.addRow(pick(self.lang, "Delay:", "Delay:"), self.tt_clock_delay)
+        tt_form.addRow("", self.tt_save_pins)
+        tt_form.addRow("", self.tt_save_currents)
+        postlayout_layout.addLayout(tt_form)
+        postlayout_layout.addWidget(
+            self._make_hint_label(
+                pick(
+                    self.lang,
+                    "Configura ua[] como entrada DC, seno, salida medida o alta impedancia. Se guarda por proyecto.",
+                    "Configure ua[] as DC input, sine input, measured output, or high impedance. Saved per project.",
+                )
+            )
+        )
+        self._configure_tiny_tapeout_pin_table()
+        postlayout_layout.addWidget(self.tt_analog_table)
         outer.addWidget(postlayout_box)
 
         advanced_box = self._build_subsection_card()
@@ -564,6 +630,54 @@ class SimulationTab(QWidget):
         self.sim_stack.addWidget(op_page)
         outer.addWidget(self.sim_stack)
         return card
+
+    def _build_clock_edge_row(self) -> QWidget:
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.tt_clock_rise)
+        layout.addWidget(self.tt_clock_fall)
+        return row
+
+    def _configure_tiny_tapeout_pin_table(self) -> None:
+        self.tt_analog_table.verticalHeader().hide()
+        self.tt_analog_table.setMinimumHeight(220)
+        self.tt_analog_table.setAlternatingRowColors(True)
+        role_items = [
+            (pick(self.lang, "Hi-Z / no conectar", "Hi-Z / no source"), "hiz"),
+            (pick(self.lang, "Entrada DC", "DC input"), "dc"),
+            (pick(self.lang, "Entrada seno", "Sine input"), "sine"),
+            (pick(self.lang, "Salida / medir", "Output / measure"), "output"),
+            (pick(self.lang, "Bias", "Bias"), "bias"),
+            (pick(self.lang, "Tierra", "Ground"), "ground"),
+        ]
+        load_items = [
+            (pick(self.lang, "Sin carga", "No load"), "none"),
+            (pick(self.lang, "Carga C", "C load"), "cap"),
+            (pick(self.lang, "Carga RC", "RC load"), "rc"),
+        ]
+        for row in range(8):
+            pin = f"ua[{row}]"
+            pin_item = QTableWidgetItem(pin)
+            pin_item.setFlags(pin_item.flags() & ~Qt.ItemIsEditable)
+            self.tt_analog_table.setItem(row, 0, pin_item)
+
+            role_combo = QComboBox()
+            for label, value in role_items:
+                role_combo.addItem(label, value)
+            self.tt_analog_table.setCellWidget(row, 1, role_combo)
+
+            value_item = QTableWidgetItem("0")
+            self.tt_analog_table.setItem(row, 2, value_item)
+
+            load_combo = QComboBox()
+            for label, value in load_items:
+                load_combo.addItem(label, value)
+            self.tt_analog_table.setCellWidget(row, 3, load_combo)
+            role_combo.currentIndexChanged.connect(self._save_project_simulation_profile)
+            load_combo.currentIndexChanged.connect(self._save_project_simulation_profile)
+        self.tt_analog_table.resizeColumnsToContents()
+        self.tt_analog_table.itemChanged.connect(self._save_project_simulation_profile)
 
     def _build_probe_editor(self) -> QWidget:
         card = self._build_section_card()
@@ -837,6 +951,11 @@ class SimulationTab(QWidget):
         self.add_probe_btn.clicked.connect(lambda: self._add_probe_row())
         self.refresh_points_btn.clicked.connect(self._refresh_probe_points)
         self.sim_type.currentIndexChanged.connect(self.sim_stack.setCurrentIndex)
+        self.sim_type.currentIndexChanged.connect(self._save_project_simulation_profile)
+        self.testbench_mode.currentIndexChanged.connect(self._sync_testbench_mode_state)
+        self.testbench_mode.currentIndexChanged.connect(self._save_project_simulation_profile)
+        self.save_mode.currentIndexChanged.connect(self._save_project_simulation_profile)
+        self.corner.currentIndexChanged.connect(self._save_project_simulation_profile)
         self.file_view.textChanged.connect(self._refresh_probe_points)
         self.file_view.textChanged.connect(self._refresh_internal_net_inspector)
         self.metric_signal.currentTextChanged.connect(self._update_measurements)
@@ -865,8 +984,24 @@ class SimulationTab(QWidget):
         self.runner.finished.connect(self._finished)
         self._sync_em_options_state()
         self._sync_postlayout_load_controls()
+        self._sync_testbench_mode_state()
         self._refresh_internal_net_inspector()
         self.postlayout_load_mode.currentIndexChanged.connect(self._sync_postlayout_load_controls)
+        self.postlayout_load_mode.currentIndexChanged.connect(self._save_project_simulation_profile)
+        self.postlayout_use_ic.toggled.connect(self._save_project_simulation_profile)
+        self.postlayout_load_cap.textChanged.connect(self._save_project_simulation_profile)
+        self.postlayout_load_res.textChanged.connect(self._save_project_simulation_profile)
+        self.tt_profile.currentIndexChanged.connect(self._apply_tiny_tapeout_profile_defaults)
+        self.tt_profile.currentIndexChanged.connect(self._save_project_simulation_profile)
+        self.tt_clock_mode.currentIndexChanged.connect(self._sync_testbench_mode_state)
+        self.tt_clock_mode.currentIndexChanged.connect(self._save_project_simulation_profile)
+        self.tt_clock_period.textChanged.connect(self._save_project_simulation_profile)
+        self.tt_clock_high.textChanged.connect(self._save_project_simulation_profile)
+        self.tt_clock_rise.textChanged.connect(self._save_project_simulation_profile)
+        self.tt_clock_fall.textChanged.connect(self._save_project_simulation_profile)
+        self.tt_clock_delay.textChanged.connect(self._save_project_simulation_profile)
+        self.tt_save_pins.toggled.connect(self._save_project_simulation_profile)
+        self.tt_save_currents.toggled.connect(self._save_project_simulation_profile)
 
     def _pick_file(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(self, "Select netlist", "", "SPICE Files (*.spice *.sp *.cir)")
@@ -874,6 +1009,7 @@ class SimulationTab(QWidget):
             self.load_netlist_path(file_path)
 
     def load_netlist_path(self, file_path: str) -> None:
+        self.load_project_profile()
         self.netlist_edit.setText(file_path)
         self._update_run_summary()
         try:
@@ -888,6 +1024,7 @@ class SimulationTab(QWidget):
             self._append_log(pick(self.lang, "Selecciona un netlist primero.\n", "Select a netlist first.\n"))
             return
 
+        self._save_project_simulation_profile()
         outputs = self._create_simulation_outputs()
         self._last_outputs = outputs
         self.output_dir.setText(str(outputs.results))
@@ -1297,12 +1434,117 @@ class SimulationTab(QWidget):
                 points.append(text)
         return points
 
+    def _effective_save_points(self, source_text: str) -> list[str]:
+        points = self._selected_probe_points()
+        if self._testbench_mode_key() != "tiny_tapeout":
+            return points
+
+        pins = self._extract_preferred_subckt_pins(source_text)
+        if self.tt_save_pins.isChecked():
+            points.extend(pin for pin in pins if self._is_tiny_tapeout_observable_pin(pin))
+        if self.tt_save_currents.isChecked():
+            points.extend(self._tiny_tapeout_source_currents(pins))
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for point in points:
+            normalized = point.strip().lower()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                deduped.append(point)
+        return deduped
+
+    def _extract_preferred_subckt_pins(self, source_text: str) -> list[str]:
+        preferred = Path(self.netlist_edit.text().strip() or "").stem.lower()
+        if preferred.endswith("_extracted"):
+            preferred = preferred[: -len("_extracted")]
+        active_name = ""
+        active_pins: list[str] = []
+        collecting = False
+        found: list[tuple[str, list[str]]] = []
+        for raw_line in source_text.splitlines():
+            stripped = raw_line.strip()
+            lowered = stripped.lower()
+            if lowered.startswith(".subckt "):
+                if active_name:
+                    found.append((active_name, active_pins))
+                parts = stripped.split()
+                active_name = parts[1] if len(parts) >= 2 else ""
+                active_pins = parts[2:] if len(parts) >= 3 else []
+                collecting = True
+                continue
+            if collecting and stripped.startswith("+"):
+                active_pins.extend(stripped[1:].split())
+                continue
+            if active_name:
+                found.append((active_name, active_pins))
+                active_name = ""
+                active_pins = []
+            collecting = False
+        if active_name:
+            found.append((active_name, active_pins))
+        if preferred:
+            for name, pins in found:
+                if name.lower() == preferred:
+                    return pins
+        return found[-1][1] if found else []
+
+    @staticmethod
+    def _is_tiny_tapeout_observable_pin(pin: str) -> bool:
+        normalized = pin.strip().lower()
+        return (
+            normalized.startswith("uo_out[")
+            or normalized.startswith("uio_out[")
+            or normalized.startswith("ua[")
+            or normalized in {"clk", "ena", "rst_n"}
+        )
+
+    def _tiny_tapeout_source_currents(self, pins: list[str]) -> list[str]:
+        currents: list[str] = []
+        pin_config = self._tiny_tapeout_pin_config()
+        for pin in pins:
+            normalized = pin.strip().lower()
+            config = pin_config.get(normalized, {})
+            role = str(config.get("role", "")).strip().lower()
+            has_source = (
+                normalized in {"vdpwr", "vgnd", "vnb", "vpb", "vsub", "vsubs", "clk", "ena", "en", "enable", "rst_n", "reset_n"}
+                or normalized.startswith("ui_in[")
+                or normalized.startswith("uio_in[")
+                or normalized.startswith("uio_oe[")
+                or role in {"dc", "input_dc", "bias", "sine", "input_sine", "ground", "low", "zero", "high", "one"}
+            )
+            if has_source:
+                currents.append(f"i(V{self._spice_source_suffix(pin)})")
+        return currents
+
+    @staticmethod
+    def _spice_source_suffix(pin: str) -> str:
+        return "".join(char if char.isalnum() or char == "_" else "_" for char in pin).strip("_") or "pin"
+
+    def _set_probe_points(self, points: list[str]) -> None:
+        for row, combo, button in list(self._probe_rows):
+            while row.count():
+                item = row.takeAt(0)
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+            self.probe_layout.removeItem(row)
+            self._probe_rows.remove((row, combo, button))
+        for point in points:
+            self._add_probe_row(point)
+        if not self._probe_rows:
+            self._add_probe_row()
+
     def _write_generated_netlist(self, outputs: OutputPaths) -> Path:
         source_text = ensure_sky130_model_lib(
             self.file_view.toPlainText(),
             self.settings.pdk_paths.sky130a,
         )
         source_text = apply_model_corner(source_text, self.corner.currentText())
+        if self._testbench_mode_key() == "complete":
+            generated_path = outputs.results / "run.spice"
+            generated_path.write_text(source_text.rstrip() + "\n")
+            return generated_path
+
         analysis_type = self._analysis_type_key()
         params = {
             "tran_step": self.tran_step.text().strip(),
@@ -1324,14 +1566,17 @@ class SimulationTab(QWidget):
             source_text=source_text,
             analysis_type=analysis_type,
             analysis_params=params,
-            save_points=self._selected_probe_points(),
+            save_points=self._effective_save_points(source_text),
             extra_directives=self.extra_directives.toPlainText(),
             preferred_subckt=Path(self.netlist_edit.text().strip() or "").stem,
             wrapper_options={
+                "wrapper_mode": self._testbench_mode_key(),
                 "tiny_tapeout_initial_conditions": self.postlayout_use_ic.isChecked(),
                 "tiny_tapeout_load_mode": str(self.postlayout_load_mode.currentData()),
                 "tiny_tapeout_load_cap_value": self.postlayout_load_cap.text().strip(),
                 "tiny_tapeout_load_res_value": self.postlayout_load_res.text().strip(),
+                "tiny_tapeout_clock": self._tiny_tapeout_clock_config(),
+                "tiny_tapeout_pin_config": self._tiny_tapeout_pin_config(),
             },
         )
 
@@ -1417,6 +1662,142 @@ class SimulationTab(QWidget):
         mode = str(self.postlayout_load_mode.currentData())
         self.postlayout_load_cap.setEnabled(mode in {"cap", "rc"})
         self.postlayout_load_res.setEnabled(mode == "rc")
+
+    def _sync_testbench_mode_state(self) -> None:
+        mode = self._testbench_mode_key()
+        generated_mode = mode != "complete"
+        tiny_mode = mode == "tiny_tapeout"
+        for widget in (
+            self.sim_type,
+            self.save_mode,
+            self.tran_step,
+            self.tran_stop,
+            self.tran_start,
+            self.tran_uic,
+            self.ac_sweep,
+            self.ac_points,
+            self.ac_start,
+            self.ac_stop,
+            self.dc_source,
+            self.dc_start,
+            self.dc_stop,
+            self.dc_step,
+            self.add_probe_btn,
+            self.refresh_points_btn,
+            self.metric_signal,
+            self.metric_reference,
+            self.extra_directives,
+        ):
+            widget.setEnabled(generated_mode)
+        self.sim_stack.setEnabled(generated_mode)
+        for widget in (
+            self.postlayout_use_ic,
+            self.postlayout_load_mode,
+            self.postlayout_load_cap,
+            self.postlayout_load_res,
+            self.tt_profile,
+            self.tt_clock_mode,
+            self.tt_clock_period,
+            self.tt_clock_high,
+            self.tt_clock_rise,
+            self.tt_clock_fall,
+            self.tt_clock_delay,
+            self.tt_save_pins,
+            self.tt_save_currents,
+            self.tt_analog_table,
+        ):
+            widget.setEnabled(tiny_mode)
+        if tiny_mode:
+            self._sync_postlayout_load_controls()
+            clock_pulse = str(self.tt_clock_mode.currentData()) == "pulse"
+            for widget in (self.tt_clock_period, self.tt_clock_high, self.tt_clock_rise, self.tt_clock_fall, self.tt_clock_delay):
+                widget.setEnabled(clock_pulse)
+
+    def _apply_tiny_tapeout_profile_defaults(self) -> None:
+        profile = str(self.tt_profile.currentData())
+        if profile == "digital":
+            for row in range(self.tt_analog_table.rowCount()):
+                self._set_tt_pin_role(row, "ground")
+                self._set_tt_pin_load(row, "none")
+                item = self.tt_analog_table.item(row, 2)
+                if item:
+                    item.setText("0")
+        elif profile == "analog":
+            for row in range(self.tt_analog_table.rowCount()):
+                self._set_tt_pin_role(row, "hiz")
+                self._set_tt_pin_load(row, "none")
+        self._save_project_simulation_profile()
+
+    def _set_tt_pin_role(self, row: int, role: str) -> None:
+        combo = self.tt_analog_table.cellWidget(row, 1)
+        if isinstance(combo, QComboBox):
+            index = combo.findData(role)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+
+    def _set_tt_pin_load(self, row: int, load_mode: str) -> None:
+        combo = self.tt_analog_table.cellWidget(row, 3)
+        if isinstance(combo, QComboBox):
+            index = combo.findData(load_mode)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+
+    def _tiny_tapeout_clock_config(self) -> dict[str, str]:
+        return {
+            "mode": str(self.tt_clock_mode.currentData() or "low"),
+            "period": self.tt_clock_period.text().strip() or "10n",
+            "high_time": self.tt_clock_high.text().strip() or "5n",
+            "rise": self.tt_clock_rise.text().strip() or "100p",
+            "fall": self.tt_clock_fall.text().strip() or "100p",
+            "delay": self.tt_clock_delay.text().strip() or "0",
+            "vlow": "0",
+            "vhigh": "1.8",
+        }
+
+    def _tiny_tapeout_pin_config(self) -> dict[str, dict[str, str]]:
+        config: dict[str, dict[str, str]] = {}
+        for row in range(self.tt_analog_table.rowCount()):
+            pin_item = self.tt_analog_table.item(row, 0)
+            value_item = self.tt_analog_table.item(row, 2)
+            role_combo = self.tt_analog_table.cellWidget(row, 1)
+            load_combo = self.tt_analog_table.cellWidget(row, 3)
+            if not pin_item or not isinstance(role_combo, QComboBox) or not isinstance(load_combo, QComboBox):
+                continue
+            pin = pin_item.text().strip().lower()
+            role = str(role_combo.currentData() or "hiz")
+            value = value_item.text().strip() if value_item else ""
+            config[pin] = {
+                "role": role,
+                "value": value or "0",
+                "offset": value or "0",
+                "amplitude": "100m",
+                "frequency": "1Meg",
+                "load_mode": str(load_combo.currentData() or "none"),
+                "load_cap": self.postlayout_load_cap.text().strip() or "10f",
+                "load_res": self.postlayout_load_res.text().strip() or "1k",
+            }
+        return config
+
+    def _load_tiny_tapeout_pin_config(self, config: dict[str, object]) -> None:
+        self.tt_analog_table.blockSignals(True)
+        for row in range(self.tt_analog_table.rowCount()):
+            pin_item = self.tt_analog_table.item(row, 0)
+            value_item = self.tt_analog_table.item(row, 2)
+            if not pin_item:
+                continue
+            pin = pin_item.text().strip().lower()
+            entry = config.get(pin, {})
+            if not isinstance(entry, dict):
+                continue
+            role = str(entry.get("role", "")).strip()
+            load_mode = str(entry.get("load_mode", "")).strip()
+            if role:
+                self._set_tt_pin_role(row, role)
+            if load_mode:
+                self._set_tt_pin_load(row, load_mode)
+            if value_item and "value" in entry:
+                value_item.setText(str(entry.get("value", "")))
+        self.tt_analog_table.blockSignals(False)
 
     def _update_run_summary(self, status: str | None = None) -> None:
         self.summary_status_value.setText(status or self.summary_status_value.text())
@@ -1884,6 +2265,117 @@ class SimulationTab(QWidget):
     def _compact_timestamp() -> str:
         return datetime.now().strftime("%y%m%d-%H%M")
 
+    def _project_simulation_config_path(self) -> Path:
+        base = self.outputs_getter().base
+        return base / ".sky130-flow-gui" / "simulation.json"
+
+    def load_project_profile(self) -> None:
+        config_path = self._project_simulation_config_path()
+        if not config_path.is_file():
+            self._sync_testbench_mode_state()
+            return
+        try:
+            data = json.loads(config_path.read_text())
+        except (OSError, ValueError, TypeError) as exc:
+            self._append_log(f"Failed to load project simulation profile: {exc}\n")
+            self._sync_testbench_mode_state()
+            return
+
+        self._loading_project_profile = True
+        try:
+            mode = str(data.get("testbench_mode", "")).strip()
+            if mode:
+                index = self.testbench_mode.findData(mode)
+                if index >= 0:
+                    self.testbench_mode.setCurrentIndex(index)
+
+            sim_type = str(data.get("analysis_type", "")).strip()
+            if sim_type:
+                index = self.sim_type.findText(sim_type)
+                if index >= 0:
+                    self.sim_type.setCurrentIndex(index)
+
+            save_mode = str(data.get("save_mode", "")).strip()
+            if save_mode:
+                index = self.save_mode.findText(save_mode)
+                if index >= 0:
+                    self.save_mode.setCurrentIndex(index)
+
+            corner = str(data.get("corner", "")).strip()
+            if corner:
+                index = self.corner.findText(corner)
+                if index >= 0:
+                    self.corner.setCurrentIndex(index)
+
+            postlayout = data.get("postlayout", {}) if isinstance(data.get("postlayout"), dict) else {}
+            self.postlayout_use_ic.setChecked(bool(postlayout.get("initial_conditions", self.postlayout_use_ic.isChecked())))
+            load_mode = str(postlayout.get("load_mode", "")).strip()
+            if load_mode:
+                index = self.postlayout_load_mode.findData(load_mode)
+                if index >= 0:
+                    self.postlayout_load_mode.setCurrentIndex(index)
+            self.postlayout_load_cap.setText(str(postlayout.get("load_cap", self.postlayout_load_cap.text())))
+            self.postlayout_load_res.setText(str(postlayout.get("load_res", self.postlayout_load_res.text())))
+
+            tiny_tapeout = data.get("tiny_tapeout", {}) if isinstance(data.get("tiny_tapeout"), dict) else {}
+            profile = str(tiny_tapeout.get("profile", "")).strip()
+            if profile:
+                index = self.tt_profile.findData(profile)
+                if index >= 0:
+                    self.tt_profile.setCurrentIndex(index)
+            clock = tiny_tapeout.get("clock", {}) if isinstance(tiny_tapeout.get("clock"), dict) else {}
+            clock_mode = str(clock.get("mode", "")).strip()
+            if clock_mode:
+                index = self.tt_clock_mode.findData(clock_mode)
+                if index >= 0:
+                    self.tt_clock_mode.setCurrentIndex(index)
+            self.tt_clock_period.setText(str(clock.get("period", self.tt_clock_period.text())))
+            self.tt_clock_high.setText(str(clock.get("high_time", self.tt_clock_high.text())))
+            self.tt_clock_rise.setText(str(clock.get("rise", self.tt_clock_rise.text())))
+            self.tt_clock_fall.setText(str(clock.get("fall", self.tt_clock_fall.text())))
+            self.tt_clock_delay.setText(str(clock.get("delay", self.tt_clock_delay.text())))
+            self.tt_save_pins.setChecked(bool(tiny_tapeout.get("save_pins", self.tt_save_pins.isChecked())))
+            self.tt_save_currents.setChecked(bool(tiny_tapeout.get("save_currents", self.tt_save_currents.isChecked())))
+            pin_config = tiny_tapeout.get("pin_config", {}) if isinstance(tiny_tapeout.get("pin_config"), dict) else {}
+            self._load_tiny_tapeout_pin_config(pin_config)
+
+            probes = data.get("probes", [])
+            if isinstance(probes, list):
+                self._set_probe_points([str(point) for point in probes if str(point).strip()])
+        finally:
+            self._loading_project_profile = False
+        self._sync_testbench_mode_state()
+
+    def _save_project_simulation_profile(self, *_args) -> None:
+        if not hasattr(self, "testbench_mode") or self._loading_project_profile:
+            return
+        config_path = self._project_simulation_config_path()
+        data = {
+            "testbench_mode": self._testbench_mode_key(),
+            "analysis_type": self.sim_type.currentText(),
+            "save_mode": self.save_mode.currentText(),
+            "corner": self.corner.currentText(),
+            "probes": self._selected_probe_points(),
+            "postlayout": {
+                "initial_conditions": self.postlayout_use_ic.isChecked(),
+                "load_mode": str(self.postlayout_load_mode.currentData()),
+                "load_cap": self.postlayout_load_cap.text().strip(),
+                "load_res": self.postlayout_load_res.text().strip(),
+            },
+            "tiny_tapeout": {
+                "profile": str(self.tt_profile.currentData()),
+                "clock": self._tiny_tapeout_clock_config(),
+                "save_pins": self.tt_save_pins.isChecked(),
+                "save_currents": self.tt_save_currents.isChecked(),
+                "pin_config": self._tiny_tapeout_pin_config(),
+            },
+        }
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+        except OSError as exc:
+            self._append_log(f"Failed to save project simulation profile: {exc}\n")
+
     def _analysis_type_key(self) -> str:
         mapping = {
             pick(self.lang, "Transitorio", "Transient"): "Transient",
@@ -1892,6 +2384,9 @@ class SimulationTab(QWidget):
             pick(self.lang, "Punto de operación", "Operating Point"): "Operating Point",
         }
         return mapping.get(self.sim_type.currentText(), "Transient")
+
+    def _testbench_mode_key(self) -> str:
+        return str(self.testbench_mode.currentData() or "generic")
 
     def _save_mode_key(self) -> str:
         mapping = {

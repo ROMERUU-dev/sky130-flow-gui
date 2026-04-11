@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -95,9 +97,22 @@ class PreferencesTab(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        general_layout = QVBoxLayout(self.general_page)
+
+        general_outer = QVBoxLayout(self.general_page)
+        general_outer.setContentsMargins(0, 0, 0, 0)
+        general_scroll = QScrollArea()
+        general_scroll.setWidgetResizable(True)
+        general_scroll.setFrameShape(QScrollArea.NoFrame)
+        general_outer.addWidget(general_scroll)
+        general_content = QWidget()
+        general_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        general_scroll.setWidget(general_content)
+
+        general_layout = QVBoxLayout(general_content)
         general_layout.setContentsMargins(14, 14, 14, 14)
+        general_layout.setSpacing(12)
         form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
         tools = asdict(self.settings.tool_paths)
         pdk = asdict(self.settings.pdk_paths)

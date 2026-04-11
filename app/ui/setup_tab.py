@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -134,6 +136,19 @@ class SetupTab(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        layout.addWidget(scroll)
+
+        page = QWidget()
+        page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        scroll.setWidget(page)
+
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(14)
 
         title = QLabel(pick(self.lang, "Asistente de entorno", "Setup Assistant"))
@@ -166,7 +181,7 @@ class SetupTab(QWidget):
         for step in self._wizard_steps:
             self.step_list.addItem(QListWidgetItem(step))
 
-        content_row = QHBoxLayout()
+        content_row = QVBoxLayout()
         content_row.setSpacing(18)
 
         step_card = QFrame()
