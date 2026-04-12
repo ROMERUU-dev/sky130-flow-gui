@@ -637,9 +637,10 @@ class SetupTab(QWidget):
                     f"The detected PDK at {sky130a_path} was adopted.\n",
                 )
             )
-            self._set_step(self.STEP_APPLY)
+            self._route_after_pdk_ready()
             self._finish_activity(True, pick(self.lang, "PDK listo para usar", "PDK ready to use"))
             return
+        self._route_after_pdk_ready()
         self._finish_activity(True, pick(self.lang, "El PDK ya estaba aplicado", "The PDK was already applied"))
 
     def install_managed_pdk(self) -> None:
@@ -658,7 +659,7 @@ class SetupTab(QWidget):
             self.send_status.emit(pick(self.lang, "PDK gestionado listo", "Managed PDK ready"))
             self.refresh_detection()
             self.refresh_validation()
-            self._set_step(self.STEP_APPLY)
+            self._route_after_pdk_ready()
             self._finish_activity(True, pick(self.lang, "PDK gestionado instalado", "Managed PDK installed"))
             return
         self.log.append(pick(self.lang, f"{result.message}\n", f"{result.message}\n"))
@@ -828,6 +829,7 @@ class SetupTab(QWidget):
             self.refresh_detection()
             self.refresh_validation()
             self._apply_detected_defaults(automatic=True)
+            self._route_after_tools_ready()
             self._finish_activity(True, pick(self.lang, "Instalación lista", "Installation ready"))
             return
 
@@ -842,7 +844,7 @@ class SetupTab(QWidget):
             self.send_status.emit(pick(self.lang, "Build de PDK listo", "PDK build ready"))
             self.refresh_detection()
             self.refresh_validation()
-            self._set_step(self.STEP_APPLY)
+            self._route_after_pdk_ready()
             self._finish_activity(True, pick(self.lang, "Build de PDK listo", "PDK build ready"))
             return
 
@@ -858,7 +860,7 @@ class SetupTab(QWidget):
             self.refresh_detection()
             self.refresh_validation()
             self._apply_detected_defaults(automatic=True)
-            self._set_step(self.STEP_APPLY)
+            self._route_after_pdk_ready()
             self._finish_activity(True, pick(self.lang, "Bundle PDK listo", "PDK bundle ready"))
             return
 
@@ -889,18 +891,46 @@ class SetupTab(QWidget):
             return
 
         if action == "install_tools":
-            self.log.append(
-                pick(
-                    self.lang,
-                    f"\nEl proceso terminó con error (exit={code}, status={status}). Revisa el log; si falló `pkexec` o `apt`, el `.venv` no fue tocado.\n",
-                    f"\nThe process ended with an error (exit={code}, status={status}). Review the log; if `pkexec` or `apt` failed, `.venv` was not modified.\n",
-                )
-            )
-            self.send_status.emit(pick(self.lang, "Setup falló", "Setup failed"))
-            self._finish_activity(False, pick(self.lang, "Instalación falló", "Installation failed"))
+            self._handle_install_tools_failure(code, status)
             return
 
         self._finish_activity(code == 0, pick(self.lang, "Acción completada", "Action finished"))
+
+    def _handle_install_tools_failure(self, code: int, status: str) -> None:
+        self.log.append(
+            pick(
+                self.lang,
+                f"\nEl instalador terminó con advertencia/error (exit={code}, status={status}). Revalidando lo que quedó instalado.\n",
+                f"\nThe installer ended with a warning/error (exit={code}, status={status}). Revalidating what is installed now.\n",
+            )
+        )
+        self.refresh_detection()
+        self.refresh_validation()
+        self._apply_detected_defaults(automatic=True)
+        diagnosis = self._last_diagnosis
+        if diagnosis is not None and self._tools_ready(diagnosis):
+            self.log.append(
+                pick(
+                    self.lang,
+                    "Las tools base ya se detectan correctamente; se conserva el log porque el proceso reportó error al salir.\n",
+                    "The base tools are now detected correctly; the log is kept because the process reported an error on exit.\n",
+                )
+            )
+            self.send_status.emit(pick(self.lang, "Tools detectadas", "Tools detected"))
+            self._route_after_tools_ready()
+            self._finish_activity(True, pick(self.lang, "Tools detectadas", "Tools detected"))
+            return
+
+        self.log.append(
+            pick(
+                self.lang,
+                "Siguen faltando tools después de revalidar. Revisa el log del instalador para ver el paquete o comando bloqueante.\n",
+                "Tools are still missing after revalidation. Review the installer log for the blocking package or command.\n",
+            )
+        )
+        self.send_status.emit(pick(self.lang, "Setup falló", "Setup failed"))
+        self._set_step(self.STEP_TOOLS)
+        self._finish_activity(False, pick(self.lang, "Instalación falló", "Installation failed"))
 
     def _apply_detected_defaults(self, automatic: bool) -> None:
         self._begin_activity(
@@ -952,9 +982,38 @@ class SetupTab(QWidget):
             )
         self._finish_activity(True, pick(self.lang, "Sin cambios pendientes", "No pending changes"))
 
+    @staticmethod
+    def _tools_ready(diagnosis) -> bool:
+        return all(tool.status in {"ok", "alias"} for tool in diagnosis.tools.values())
+
+    @staticmethod
+    def _pdk_ready(diagnosis) -> bool:
+        return diagnosis.pdk.status == "present"
+
+    def _route_after_pdk_ready(self) -> None:
+        diagnosis = self._last_diagnosis
+        if diagnosis is not None and not self._tools_ready(diagnosis):
+            self.log.append(
+                pick(
+                    self.lang,
+                    "PDK listo. Aún faltan tools base, continúa con el paso de instalación de tools.\n",
+                    "PDK is ready. Base tools are still missing, continue with the tools installation step.\n",
+                )
+            )
+            self._set_step(self.STEP_TOOLS)
+            return
+        self._set_step(self.STEP_APPLY)
+
+    def _route_after_tools_ready(self) -> None:
+        diagnosis = self._last_diagnosis
+        if diagnosis is not None and self._pdk_ready(diagnosis):
+            self._set_step(self.STEP_APPLY)
+            return
+        self._set_step(self.STEP_PDK)
+
     def _update_ready_state(self, diagnosis) -> None:
-        tools_ready = all(tool.status in {"ok", "alias"} for tool in diagnosis.tools.values())
-        pdk_ready = diagnosis.pdk.status == "present"
+        tools_ready = self._tools_ready(diagnosis)
+        pdk_ready = self._pdk_ready(diagnosis)
         python_ready = not diagnosis.python_env.problems and diagnosis.python_env.requirements_ok
 
         def summary(ready: bool, partial: bool = False) -> str:
@@ -1069,7 +1128,7 @@ class SetupTab(QWidget):
         if self._active_operations > 0:
             return
         diagnosis = self._last_diagnosis
-        tools_ready = bool(diagnosis) and all(tool.status in {"ok", "alias"} for tool in diagnosis.tools.values())
+        tools_ready = bool(diagnosis) and self._tools_ready(diagnosis)
 
         self.validate_btn.setEnabled(True)
         self.refresh_detect_btn.setEnabled(True)
