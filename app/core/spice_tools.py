@@ -98,9 +98,18 @@ def build_generated_netlist(
     cleaned_lines: list[str] = []
     inserted = False
     wrapper_lines = _auto_wrapper_lines(source_text, preferred_subckt, wrapper_options or {})
+    source_lines = _normalize_split_initial_conditions(source_text.splitlines())
+    in_control_block = False
 
-    for line in source_text.splitlines():
+    for line in source_lines:
         stripped = line.strip().lower()
+        if stripped.startswith(".control"):
+            in_control_block = True
+            continue
+        if in_control_block:
+            if stripped.startswith(".endc"):
+                in_control_block = False
+            continue
         if stripped.startswith(ANALYSIS_DIRECTIVES):
             continue
         if not inserted and stripped == ".end":
@@ -117,6 +126,29 @@ def build_generated_netlist(
         cleaned_lines.append(".end")
 
     return "\n".join(cleaned_lines).rstrip() + "\n"
+
+
+def _normalize_split_initial_conditions(lines: list[str]) -> list[str]:
+    """Join Xschem-wrapped .ic value lines such as `.ic ...` followed by `v(n)=...`."""
+    normalized: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+        if stripped.lower().startswith(".ic "):
+            merged = line.rstrip()
+            index += 1
+            while index < len(lines):
+                continuation = lines[index].strip()
+                if not continuation.lower().startswith("v("):
+                    break
+                merged = f"{merged} {continuation}"
+                index += 1
+            normalized.append(merged)
+            continue
+        normalized.append(line)
+        index += 1
+    return normalized
 
 
 def ensure_sky130_model_lib(source_text: str, sky130a_path: str) -> str:

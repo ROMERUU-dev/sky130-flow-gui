@@ -174,6 +174,44 @@ class PostLayoutFlowTest(unittest.TestCase):
         self.assertNotIn("Auto-generated wrapper", generated)
         self.assertIn(".tran 1n 1u", generated)
 
+    def test_generated_netlist_ignores_source_control_block_and_joins_split_ic(self) -> None:
+        source = "\n".join(
+            [
+                ".lib /pdk/sky130A/libs.tech/combined/sky130.lib.spice tt",
+                "X1 net1 VGND VGND VDPWR VDPWR net2 sky130_fd_sc_hd__inv_1",
+                ".ic v(net1)=0.95 v(net2)=0.65 v(net3)=0.05",
+                "  v(net4)=0.35",
+                ".control",
+                "save v(net1)",
+                "tran 0.1n 20n uic",
+                "write /broken-",
+                "path/out.raw",
+                ".endc",
+                ".end",
+            ]
+        )
+
+        generated = build_generated_netlist(
+            source_text=source,
+            analysis_type="Transient",
+            analysis_params={
+                "tran_step": "0.2n",
+                "tran_stop": "1u",
+                "tran_uic": "1",
+                "save_mode": "Selected probes only",
+            },
+            save_points=["net1", "net2"],
+            extra_directives="",
+            wrapper_options={"wrapper_mode": "none"},
+        )
+
+        self.assertIn(".ic v(net1)=0.95 v(net2)=0.65 v(net3)=0.05 v(net4)=0.35", generated)
+        self.assertIn(".save v(net1) v(net2)", generated)
+        self.assertIn(".tran 0.2n 1u uic", generated)
+        self.assertNotIn(".control", generated)
+        self.assertNotIn("write /broken-", generated)
+        self.assertNotIn("path/out.raw", generated)
+
     def test_tiny_tapeout_wrapper_uses_configured_clock_and_analog_pin_roles(self) -> None:
         source = "\n".join(
             [
