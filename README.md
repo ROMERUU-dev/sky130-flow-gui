@@ -260,10 +260,12 @@ Build it from the repo root:
 ./scripts/build_deb.sh
 ```
 
+By default, the package version is read from the repo `VERSION` file.
+
 Or specify version and architecture explicitly:
 
 ```bash
-./scripts/build_deb.sh 0.1.0 all
+./scripts/build_deb.sh 0.2.0 all
 ```
 
 The generated package is written to:
@@ -298,6 +300,26 @@ Recommended flow after installing the `.deb`:
 2. Open `⬢ Entorno / Setup`
 3. Complete the setup wizard
 4. Validate the environment before running extraction or simulation
+
+## PDK Bundle Archive
+
+To build the SKY130 PDK bundle archive used as a GitHub release asset:
+
+```bash
+./scripts/build_tt_pdk_bundle.sh /home/romeruu/pdk/sky130A
+```
+
+Or specify the release version explicitly:
+
+```bash
+./scripts/build_tt_pdk_bundle.sh /home/romeruu/pdk/sky130A 0.2.0
+```
+
+The generated archive is written to:
+
+```text
+dist/tt-pdk-sky130a_<version>.tar.gz
+```
 
 ## Project Structure
 

@@ -4,9 +4,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
+VERSION_FILE="$REPO_ROOT/VERSION"
+
+DEFAULT_VERSION="0.1.0"
+if [ -f "$VERSION_FILE" ]; then
+  DEFAULT_VERSION="$(<"$VERSION_FILE")"
+fi
 
 SOURCE_SKY130A="${1:-$HOME/pdk/sky130A}"
-VERSION="${2:-0.1.0}"
+VERSION="${2:-$DEFAULT_VERSION}"
 BUNDLE_NAME="tt-pdk-sky130a"
 OUTPUT_DIR="$DIST_DIR/${BUNDLE_NAME}_${VERSION}"
 OUTPUT_TARBALL="$DIST_DIR/${BUNDLE_NAME}_${VERSION}.tar.gz"

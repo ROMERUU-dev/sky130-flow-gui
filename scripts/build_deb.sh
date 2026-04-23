@@ -5,10 +5,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
 BUILD_ROOT="$DIST_DIR/deb-build"
+VERSION_FILE="$REPO_ROOT/VERSION"
+
+DEFAULT_VERSION="0.1.0"
+if [ -f "$VERSION_FILE" ]; then
+  DEFAULT_VERSION="$(<"$VERSION_FILE")"
+fi
 
 PKG_NAME="sky130-flow-gui"
-VERSION="${1:-0.1.0}"
+VERSION="${1:-$DEFAULT_VERSION}"
 ARCH="${2:-$(dpkg --print-architecture)}"
+DEB_COMPRESSION_TYPE="${DEB_COMPRESSION_TYPE:-xz}"
+DEB_COMPRESSION_LEVEL="${DEB_COMPRESSION_LEVEL:-1}"
 PKG_DIR="$BUILD_ROOT/${PKG_NAME}_${VERSION}_${ARCH}"
 PACKAGE_VENV="$PKG_DIR/opt/$PKG_NAME/.venv"
 SOURCE_VENV="$REPO_ROOT/.venv"
@@ -151,7 +159,7 @@ EOF
 chmod 755 "$PKG_DIR/DEBIAN/prerm"
 
 mkdir -p "$DIST_DIR"
-dpkg-deb --build "$PKG_DIR" "$DIST_DIR/${PKG_NAME}_${VERSION}_${ARCH}.deb"
+dpkg-deb -Z"$DEB_COMPRESSION_TYPE" -z"$DEB_COMPRESSION_LEVEL" --build "$PKG_DIR" "$DIST_DIR/${PKG_NAME}_${VERSION}_${ARCH}.deb"
 
 echo
 echo "Package created:"

@@ -58,13 +58,13 @@
         "bundle": {
           "enabled": true,
           "name": "tt-pdk-sky130a",
-          "version": "0.2.0-beta.11",
+          "version": "0.2.0",
           "install_root": "~/pdk",
           "cache_root": "~/.cache/sky130-flow-gui/pdk",
           "minimum_free_gb": 10,
-          "asset_url": "https://github.com/ROMERUU-dev/sky130-flow-gui/releases/download/v0.2.0-beta.11/tt-pdk-sky130a_0.2.0-beta.11.tar.gz",
-          "asset_filename": "tt-pdk-sky130a_0.2.0-beta.11.tar.gz",
-          "asset_sha256": "39f8d2ea31ed068b845d379cc8418c3602793eef8f9a887374ea3b2f2bbe09af"
+          "asset_url": "https://github.com/ROMERUU-dev/sky130-flow-gui/releases/download/v0.2.0/tt-pdk-sky130a_0.2.0.tar.gz",
+          "asset_filename": "tt-pdk-sky130a_0.2.0.tar.gz",
+          "asset_sha256": "1b6e1a21193ea6894f2c889e95c73df89ad461a0cfb6e8e4d2eecd412565ecdf"
         },
         "preferred_sources": [
           "settings",
@@ -139,13 +139,13 @@
         "bundle": {
           "enabled": true,
           "name": "tt-pdk-sky130a",
-          "version": "0.2.0-beta.11",
+          "version": "0.2.0",
           "install_root": "~/pdk",
           "cache_root": "~/.cache/sky130-flow-gui/pdk",
           "minimum_free_gb": 10,
-          "asset_url": "https://github.com/ROMERUU-dev/sky130-flow-gui/releases/download/v0.2.0-beta.11/tt-pdk-sky130a_0.2.0-beta.11.tar.gz",
-          "asset_filename": "tt-pdk-sky130a_0.2.0-beta.11.tar.gz",
-          "asset_sha256": "39f8d2ea31ed068b845d379cc8418c3602793eef8f9a887374ea3b2f2bbe09af"
+          "asset_url": "https://github.com/ROMERUU-dev/sky130-flow-gui/releases/download/v0.2.0/tt-pdk-sky130a_0.2.0.tar.gz",
+          "asset_filename": "tt-pdk-sky130a_0.2.0.tar.gz",
+          "asset_sha256": "1b6e1a21193ea6894f2c889e95c73df89ad461a0cfb6e8e4d2eecd412565ecdf"
         },
         "preferred_sources": [
           "settings",
