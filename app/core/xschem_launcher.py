@@ -26,11 +26,23 @@ class XschemLaunchBuilder:
         self.settings = settings
         self.validator = EnvValidator()
 
-    def build(self, project_path: str | None = None) -> XschemLaunchSpec:
+    def build(
+        self,
+        project_path: str | None = None,
+        screen_size: tuple[int, int] | None = None,
+    ) -> XschemLaunchSpec:
         sky130a = self.validator._find_sky130a(self.settings)
         env = os.environ.copy()
         command = [self.settings.tool_paths.xschem]
         cwd: str | None = None
+
+        geometry = self.initial_geometry(screen_size)
+        if geometry:
+            # --tcl runs after xschemrc is sourced, so this overrides the
+            # fixed `initial_geometry` the SKY130 xschemrc sets. That value is
+            # in physical pixels, and xschem runs unscaled under XWayland, so
+            # on a HiDPI screen the window came up at about a quarter area.
+            command.extend(["--tcl", f"set initial_geometry {{{geometry}}}"])
 
         if sky130a is not None:
             pdk_root = sky130a.parent
@@ -60,3 +72,17 @@ class XschemLaunchBuilder:
                 command.append(str(project))
 
         return XschemLaunchSpec(command=command, cwd=cwd, env=env)
+
+    @staticmethod
+    def initial_geometry(screen_size: tuple[int, int] | None) -> str:
+        """Build an xschem geometry string covering most of the screen."""
+        if not screen_size:
+            return ""
+        width, height = screen_size
+        if width < 640 or height < 480:
+            return ""
+        target_width = max(1024, int(width * 0.82))
+        target_height = max(700, int(height * 0.82))
+        offset_x = max(0, (width - target_width) // 2)
+        offset_y = max(0, (height - target_height) // 2)
+        return f"{target_width}x{target_height}+{offset_x}+{offset_y}"

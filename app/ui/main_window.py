@@ -212,11 +212,11 @@ class MainWindow(QMainWindow):
 
     SIDEBAR_ACCENTS = {
         "light": ("#2563eb", "#e76f51", "#0f9d8a", "#d97706", "#7c3aed", "#059669", "#db2777"),
-        "dark": ("#7fa9ff", "#ff9f80", "#4fd1bd", "#fbbf24", "#b696ff", "#34d399", "#f472b6"),
+        "dark": ("#d97757", "#e0a85c", "#8fbf7a", "#e0c264", "#c39ae6", "#7fb3d5", "#d89ab0"),
     }
     SIDEBAR_ICON_NAMES = ("simulation", "lvs", "extraction", "antenna", "em", "project", "preferences")
     SIDEBAR_EXPANDED_WIDTH = 208
-    SIDEBAR_COLLAPSED_WIDTH = 60
+    SIDEBAR_COLLAPSED_WIDTH = 68
 
     def _populate_sidebar(self) -> None:
         self.sidebar.clear()
@@ -260,6 +260,14 @@ class MainWindow(QMainWindow):
         width = self.SIDEBAR_COLLAPSED_WIDTH if collapsed else self.SIDEBAR_EXPANDED_WIDTH
         self.sidebar_card.setMinimumWidth(width)
         self.sidebar_card.setMaximumWidth(width)
+        # Drives the collapsed item metrics in the stylesheet.
+        self.sidebar.setProperty("collapsed", "true" if collapsed else "false")
+        self.sidebar.style().unpolish(self.sidebar)
+        self.sidebar.style().polish(self.sidebar)
+        self.sidebar.setSpacing(6 if collapsed else 3)
+        margin = 6 if collapsed else 8
+        self.sidebar_layout.setContentsMargins(margin, margin, margin, margin)
+        self.sidebar_toggle.setVisible(True)
         for index in range(self.sidebar.count()):
             item = self.sidebar.item(index)
             if item is None:
@@ -365,8 +373,23 @@ class MainWindow(QMainWindow):
             self.app_settings.prompt_project_on_start = False
             self.settings_mgr.save(self.app_settings)
 
+    def _physical_screen_size(self) -> tuple[int, int] | None:
+        """Screen size in real pixels, which is what X11 tools receive.
+
+        Qt reports logical pixels on a scaled desktop. An X11 app running
+        through XWayland is not scaled, so it needs the physical figure.
+        """
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return None
+        available = screen.availableGeometry()
+        ratio = screen.devicePixelRatio() or 1.0
+        return (int(available.width() * ratio), int(available.height() * ratio))
+
     def _open_xschem(self) -> None:
-        launch = XschemLaunchBuilder(self.app_settings).build(self._current_project)
+        launch = XschemLaunchBuilder(self.app_settings).build(
+            self._current_project, screen_size=self._physical_screen_size()
+        )
         try:
             self._toolbar_subprocess.Popen(launch.command, cwd=launch.cwd, env=launch.env)
         except OSError as exc:

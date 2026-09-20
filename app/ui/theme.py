@@ -76,28 +76,30 @@ LIGHT = Theme(
 
 DARK = Theme(
     mode=THEME_DARK,
-    window="#10151d",
-    surface="#171e28",
-    surface_alt="#1d2530",
-    border="#273140",
-    border_strong="#35435a",
-    text="#e7edf6",
-    text_muted="#9db0c7",
-    text_subtle="#c4d0e0",
-    accent="#7fa9ff",
-    accent_soft="#1b2740",
-    accent_border="#31456b",
-    secondary="#b696ff",
-    secondary_soft="#241e3a",
-    secondary_border="#3d3361",
-    selection="#27395c",
-    scrollbar="#33415a",
-    scrollbar_hover="#44567a",
-    disabled_text="#63718a",
-    disabled_surface="#141a23",
-    success="#34d399",
-    warning="#fbbf24",
-    danger="#f87171",
+    # Warm neutral greys rather than blue-tinted ones: a blue cast on every
+    # surface fights the accent colours the pages already use for status.
+    window="#1f1e1d",
+    surface="#262624",
+    surface_alt="#302f2c",
+    border="#3a3836",
+    border_strong="#4c4945",
+    text="#f5f4ef",
+    text_muted="#a8a29a",
+    text_subtle="#d6d2ca",
+    accent="#d97757",
+    accent_soft="#33271f",
+    accent_border="#6b4433",
+    secondary="#c39ae6",
+    secondary_soft="#2b2333",
+    secondary_border="#4d3f5e",
+    selection="#3d332c",
+    scrollbar="#454340",
+    scrollbar_hover="#5a5652",
+    disabled_text="#6f6b65",
+    disabled_surface="#232221",
+    success="#8fbf7a",
+    warning="#e0a85c",
+    danger="#e08272",
 )
 
 
@@ -217,6 +219,16 @@ def build_stylesheet(theme: Theme) -> str:
         border-radius: 12px;
         font-weight: 700;
         color: {theme.text_muted};
+    }}
+    /* Collapsed, the item has no text to give it width, so the selection
+       rounded rectangle was taller than it was wide and looked squashed. */
+    QListWidget#sidebarNav[collapsed="true"]::item {{
+        min-height: 42px;
+        max-height: 42px;
+        min-width: 50px;
+        padding: 0;
+        margin: 0;
+        border-radius: 12px;
     }}
     QListWidget#sidebarNav::item:selected {{
         background: {theme.accent_soft};

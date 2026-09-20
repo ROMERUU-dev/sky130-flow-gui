@@ -38,8 +38,23 @@
 
 ### Interface
 
+- **A warmer dark theme.** The dark palette was blue-tinted, which fought the
+  accent colours the pages use for status. It is now warm neutral grey with a
+  terracotta accent.
+- **Collapsible sections open smoothly.** Expanding called `setVisible(True)`
+  on content that had never been laid out, so Qt painted one frame at the
+  widget's default geometry before the parent layout moved it. That frame is
+  the flicker. The content now stays in the layout and its height animates
+  from zero.
+- **xschem opens at a usable size.** The SKY130 `xschemrc` pins
+  `initial_geometry` to 1280x695, and xschem runs unscaled under XWayland, so
+  on a HiDPI screen it came up at roughly a quarter of the area it should. The
+  launcher now overrides that with a geometry derived from the physical screen
+  size, applied through `--tcl` so it lands after `xschemrc` is sourced.
 - **Collapsible navigation.** A toggle above the menu, or `Ctrl+B`, shrinks it
-  from 208 px to 60 px icon-only. The state is remembered.
+  from 208 px to 68 px icon-only. The state is remembered. Collapsed items are
+  sized so the selection rounded rectangle is wider than it is tall, rather
+  than looking squashed.
 - **Drawn icons.** The navigation used bare Unicode glyphs whose coverage
   varies by font, so some rendered as a dash or a box. They are painted now and
   follow the theme colour.

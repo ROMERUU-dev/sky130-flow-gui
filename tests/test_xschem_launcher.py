@@ -91,5 +91,37 @@ class XschemLaunchBuilderTest(unittest.TestCase):
         self.assertEqual(spec.command, ["xschem", "--rcfile", str(xschem_dir / "xschemrc")])
 
 
+
+class XschemGeometryTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.builder = XschemLaunchBuilder(AppSettings())
+
+    def test_geometry_covers_most_of_the_screen(self) -> None:
+        geometry = self.builder.initial_geometry((3072, 1920))
+
+        width = int(geometry.split("x")[0])
+        self.assertGreater(width, 2000)
+        self.assertLess(width, 3072)
+
+    def test_no_geometry_without_a_screen_size(self) -> None:
+        self.assertEqual(self.builder.initial_geometry(None), "")
+
+    def test_tiny_screens_are_left_alone(self) -> None:
+        self.assertEqual(self.builder.initial_geometry((320, 240)), "")
+
+    def test_the_override_runs_after_xschemrc(self) -> None:
+        """--preinit would be overwritten by the PDK's own initial_geometry."""
+        spec = self.builder.build(None, screen_size=(3072, 1920))
+
+        self.assertIn("--tcl", spec.command)
+        index = spec.command.index("--tcl")
+        self.assertIn("initial_geometry", spec.command[index + 1])
+
+    def test_no_override_is_added_without_a_screen_size(self) -> None:
+        spec = self.builder.build(None)
+
+        self.assertNotIn("--tcl", spec.command)
+
+
 if __name__ == "__main__":
     unittest.main()

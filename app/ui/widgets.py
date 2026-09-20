@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
 from PySide6.QtWidgets import (
     QFileDialog,
     QLineEdit,
@@ -42,8 +42,21 @@ def ensure_file(path: str, label: str) -> bool:
     return True
 
 
+# PySide6 does not export Qt's QWIDGETSIZE_MAX.
+QWIDGETSIZE_MAX = (1 << 24) - 1
+
+
 class CollapsibleSection(QWidget):
-    """A compact collapsible section with a clickable header."""
+    """A compact collapsible section with a clickable header.
+
+    Expanding used to call ``setVisible(True)`` on content that had never been
+    laid out, so Qt painted one frame at the widget's default geometry before
+    the parent layout moved it. That single frame is the flicker you see as the
+    section opens. The content now stays in the layout and its height is
+    animated from zero instead.
+    """
+
+    ANIMATION_MS = 130
 
     def __init__(self, title: str, content: QWidget, expanded: bool = False) -> None:
         super().__init__()
@@ -56,7 +69,8 @@ class CollapsibleSection(QWidget):
         self.toggle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         self.content = content
-        self.content.setVisible(expanded)
+        self.content.setMaximumHeight(QWIDGETSIZE_MAX if expanded else 0)
+        self.content.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -64,12 +78,32 @@ class CollapsibleSection(QWidget):
         layout.addWidget(self.toggle)
         layout.addWidget(self.content)
 
+        self._animation = QPropertyAnimation(self.content, b"maximumHeight", self)
+        self._animation.setDuration(self.ANIMATION_MS)
+        self._animation.setEasingCurve(QEasingCurve.InOutCubic)
+        self._animation.finished.connect(self._on_animation_finished)
+
         self.toggle.toggled.connect(self.set_expanded)
 
     def set_expanded(self, expanded: bool) -> None:
         self.toggle.setChecked(expanded)
         self.toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
-        self.content.setVisible(expanded)
+        self._animation.stop()
+        start = self.content.height()
+        if expanded:
+            # Measured while the widget is already positioned, so there is no
+            # intermediate frame at the wrong geometry.
+            target = max(self.content.sizeHint().height(), self.content.minimumSizeHint().height())
+        else:
+            target = 0
+        self._animation.setStartValue(start)
+        self._animation.setEndValue(target)
+        self._animation.start()
+
+    def _on_animation_finished(self) -> None:
+        if self.is_expanded():
+            # Release the cap so the content can still grow with its data.
+            self.content.setMaximumHeight(QWIDGETSIZE_MAX)
 
     def is_expanded(self) -> bool:
         return self.toggle.isChecked()
