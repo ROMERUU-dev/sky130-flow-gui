@@ -99,6 +99,15 @@ class SimulationTab(QWidget):
         self.log.document().setMaximumBlockCount(MAX_LOG_BLOCKS)
         self.log.setReadOnly(True)
         self.file_view = QTextEdit()
+        self.undo_btn = QPushButton(pick(self.lang, "Deshacer", "Undo"))
+        self.undo_btn.setToolTip("Ctrl+Z")
+        self.redo_btn = QPushButton(pick(self.lang, "Rehacer", "Redo"))
+        self.redo_btn.setToolTip("Ctrl+Shift+Z")
+        self.revert_btn = QPushButton(pick(self.lang, "Revertir al archivo", "Revert to file"))
+        self.save_as_btn = QPushButton(pick(self.lang, "Guardar como...", "Save as..."))
+        self.editor_state = QLabel()
+        self.editor_state.setObjectName("inlineHint")
+        self._editor_baseline = ""
         self.file_view.setPlaceholderText(
             pick(self.lang, "Carga un netlist y ajustalo aqui; el archivo original no se sobrescribe.", "Load a netlist, tweak it here, and the original file will remain untouched.")
         )
@@ -761,6 +770,13 @@ class SimulationTab(QWidget):
         outer.setContentsMargins(18, 18, 18, 18)
         outer.setSpacing(12)
         outer.addWidget(self._make_hint_label(pick(self.lang, "Editor temporal del deck de simulación. El archivo original no se sobrescribe.", "Temporary editor for the simulation deck. The original file is not overwritten.")))
+        editor_actions = QHBoxLayout()
+        editor_actions.addWidget(self.undo_btn)
+        editor_actions.addWidget(self.redo_btn)
+        editor_actions.addWidget(self.revert_btn)
+        editor_actions.addWidget(self.save_as_btn)
+        editor_actions.addWidget(self.editor_state, 1)
+        outer.addLayout(editor_actions)
         outer.addWidget(self.file_view)
         outer.addWidget(self._make_section_heading(pick(self.lang, "Directivas extra", "Extra Directives")))
         outer.addWidget(self.extra_directives)
@@ -832,6 +848,13 @@ class SimulationTab(QWidget):
         self.testbench_mode.currentIndexChanged.connect(self._save_project_simulation_profile)
         self.save_mode.currentIndexChanged.connect(self._save_project_simulation_profile)
         self.corner.currentIndexChanged.connect(self._save_project_simulation_profile)
+        self.undo_btn.clicked.connect(self.file_view.undo)
+        self.redo_btn.clicked.connect(self.file_view.redo)
+        self.revert_btn.clicked.connect(self.revert_netlist_editor)
+        self.save_as_btn.clicked.connect(self.save_netlist_as)
+        self.file_view.undoAvailable.connect(self.undo_btn.setEnabled)
+        self.file_view.redoAvailable.connect(self.redo_btn.setEnabled)
+        self.file_view.textChanged.connect(self._sync_editor_state)
         self.file_view.textChanged.connect(self._refresh_probe_points)
         self.file_view.textChanged.connect(self._refresh_internal_net_inspector)
         self.metric_signal.currentTextChanged.connect(self._update_measurements)
@@ -891,7 +914,7 @@ class SimulationTab(QWidget):
         self.netlist_edit.setText(file_path)
         self._update_run_summary()
         try:
-            self.file_view.setPlainText(Path(file_path).read_text())
+            self._set_editor_text(Path(file_path).read_text())
             self._refresh_probe_points()
         except OSError as exc:
             self._append_log(f"Failed to read file: {exc}\n")
@@ -2334,6 +2357,87 @@ class SimulationTab(QWidget):
         if running:
             self.summary_status_value.setText(pick(self.lang, "Corriendo", "Running"))
 
+    def _set_editor_text(self, text: str) -> None:
+        """Load text and treat it as the new baseline.
+
+        setPlainText clears the undo stack, which is what we want on a load:
+        undoing past a load would restore a different file's contents.
+        """
+        self.file_view.setPlainText(text)
+        self._editor_baseline = text
+        self._sync_editor_state()
+
+    def editor_is_modified(self) -> bool:
+        return self.file_view.toPlainText() != self._editor_baseline
+
+    def _sync_editor_state(self) -> None:
+        document = self.file_view.document()
+        self.undo_btn.setEnabled(document.isUndoAvailable())
+        self.redo_btn.setEnabled(document.isRedoAvailable())
+        modified = self.editor_is_modified()
+        self.revert_btn.setEnabled(modified and bool(self._editor_baseline))
+        self.editor_state.setText(
+            pick(self.lang, "Editado — el archivo en disco no ha cambiado", "Edited — the file on disk is unchanged")
+            if modified else ""
+        )
+
+    def revert_netlist_editor(self) -> None:
+        """Throw away the edits and reload the file from disk."""
+        path = self.netlist_edit.text().strip()
+        if not path:
+            self._set_editor_text(self._editor_baseline)
+            return
+        answer = QMessageBox.question(
+            self,
+            pick(self.lang, "Revertir cambios", "Revert changes"),
+            pick(
+                self.lang,
+                f"Se descartarán los cambios del editor y se recargará:\n{path}",
+                f"Editor changes will be discarded and this file reloaded:\n{path}",
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            self._set_editor_text(Path(path).read_text())
+        except OSError as exc:
+            self._append_log(
+                pick(self.lang, f"No se pudo releer el archivo: {exc}\n",
+                     f"The file could not be re-read: {exc}\n")
+            )
+            return
+        self._refresh_probe_points()
+
+    def save_netlist_as(self) -> None:
+        """Write the editor buffer to a file the user chooses."""
+        text = self.file_view.toPlainText()
+        if not text.strip():
+            self._append_log(pick(self.lang, "El editor está vacío.\n", "The editor is empty.\n"))
+            return
+        current = self.netlist_edit.text().strip()
+        suggestion = str(Path(current).with_suffix(".edited.spice")) if current else "netlist.spice"
+        target, _filter = QFileDialog.getSaveFileName(
+            self,
+            pick(self.lang, "Guardar netlist como", "Save netlist as"),
+            suggestion,
+            "SPICE (*.spice *.cir *.sp);;All Files (*)",
+        )
+        if not target:
+            return
+        try:
+            Path(target).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            self._append_log(
+                pick(self.lang, f"No se pudo guardar: {exc}\n", f"The file could not be saved: {exc}\n")
+            )
+            return
+        self._editor_baseline = text
+        self._sync_editor_state()
+        self._append_log(pick(self.lang, f"Netlist guardado: {target}\n", f"Netlist saved: {target}\n"))
+        self.send_status.emit(pick(self.lang, "Netlist guardado", "Netlist saved"))
+
     def _ensure_editor_content(self) -> str:
         if self.file_view.toPlainText().strip():
             return self.file_view.toPlainText()
@@ -2348,7 +2452,7 @@ class SimulationTab(QWidget):
             self._append_log(f"Failed to read file: {exc}\n")
             return ""
 
-        self.file_view.setPlainText(contents)
+        self._set_editor_text(contents)
         self._refresh_probe_points()
         return contents
 

@@ -2,6 +2,21 @@
 
 ## 0.5.0 — 2026-09-20
 
+### The netlist editor is safe to touch
+
+`Ctrl+Z` already worked — it is built into the widget — but nothing said so,
+there was no way back to the file once a buffer had been mangled, and no
+indication that the buffer differed from what was on disk at all.
+
+The editor now carries Deshacer and Rehacer buttons that enable and disable with
+the undo stack, a `Revertir al archivo` that reloads from disk behind a
+confirmation, and `Guardar como...` for keeping an edited deck. While the buffer
+differs from the file it says so: *Editado — el archivo en disco no ha cambiado*.
+
+Loading a netlist deliberately clears the undo stack, since undoing past a load
+would restore a different file's contents. A revert whose file has since
+disappeared leaves the buffer alone instead of emptying it.
+
 ### The progress bar reports real progress
 
 It was an indeterminate barber's pole: motion without information. A long
