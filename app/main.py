@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from app.core.branding import resolve_app_icon
 from app.core.env_validator import EnvValidator
 from app.core.i18n import pick
 from app.core.settings_manager import SettingsManager
@@ -60,6 +62,11 @@ def main() -> int:
     # Wayland matches windows to .desktop entries through this name; without it
     # the shell shows a generic icon and a wrong application title.
     app.setDesktopFileName("sky130-flow-gui")
+    # Without this the window and the task switcher fall back to a generic
+    # icon; the desktop file name alone only covers Wayland.
+    icon_path = resolve_app_icon()
+    if icon_path is not None:
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     settings = SettingsManager().load()
     lang = settings.language

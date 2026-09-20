@@ -2,6 +2,23 @@
 
 ## 0.5.0 — 2026-09-20
 
+### Continuous integration
+
+Every push and pull request now runs the suite on Python 3.12 and 3.14, checks
+the shell scripts, validates the dependency manifest, and builds the Debian
+package, publishing it as an artifact.
+
+Two of those checks guard things that have already gone wrong: the manifest
+check fails a bundle that is enabled without a checksum or a digital-flow image
+without a tag, and the package check fails if a maintainer-built PDK bundle ever
+reappears inside a `.deb`.
+
+### The window carries the application icon
+
+The icon was installed for the desktop entry but the app never called
+`setWindowIcon`, so the window and the task switcher fell back to a generic one.
+The desktop file name added in 0.3.1 only covers Wayland.
+
 ### The netlist editor is safe to touch
 
 `Ctrl+Z` already worked — it is built into the widget — but nothing said so,

@@ -1,5 +1,8 @@
 # SKY130 Flow GUI
 
+[![CI](https://github.com/ROMERUU-dev/sky130-flow-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/ROMERUU-dev/sky130-flow-gui/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ROMERUU-dev/sky130-flow-gui)](https://github.com/ROMERUU-dev/sky130-flow-gui/releases/latest)
+
 A Linux desktop app for managing a practical SKY130 workflow from a single interface.
 
 It does not replace `xschem`, `magic`, `ngspice`, `netgen`, or `klayout`. It coordinates them, keeps outputs organized, and gives you a cleaner workflow for schematic, post-layout, and validation tasks.
@@ -385,6 +388,11 @@ python3 -m unittest discover -s tests -t .
 ```
 
 Qt-dependent tests run headless through `QT_QPA_PLATFORM=offscreen`.
+
+Every push and pull request runs the suite on Python 3.12 and 3.14, checks the
+shell scripts, validates `app/data/dependency_manifest.json`, and builds the
+Debian package — which also fails if a maintainer-built PDK bundle ever
+reappears inside it.
 
 ## Limitations
 

@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The .deb ships 3.14; 3.12 keeps a source install working on older
+        # distributions.
+        python-version: ["3.12", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install Qt runtime libraries
+        # PySide6 wheels carry Qt itself but not these system libraries, and
+        # the offscreen platform plugin still fails to load without them.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libxkbcommon0 \
+            libxkbcommon-x11-0 \
+            libdbus-1-3 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-xfixes0 \
+            libxcb-xkb1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -t . --verbose
+
+  scripts:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check syntax
+        run: |
+          status=0
+          for script in scripts/*.sh; do
+            echo "== $script"
+            bash -n "$script" || status=1
+          done
+          exit $status
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./scripts
+          # Errors only to begin with: some of these scripts predate this
+          # workflow and have not been audited for style warnings yet.
+          severity: error
+
+  manifest:
+    name: Dependency manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate the manifest
+        # The manifest drives every install path, so a malformed one breaks
+        # setup at runtime rather than at build time.
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          path = pathlib.Path("app/data/dependency_manifest.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          problems = []
+
+          channels = data.get("channels") or {}
+          if not channels:
+              problems.append("no channels defined")
+
+          for name, channel in channels.items():
+              pdk = channel.get("pdk", {})
+              bundle = pdk.get("bundle", {})
+              if bundle.get("enabled") and not bundle.get("asset_sha256"):
+                  problems.append(f"{name}: bundle enabled without a checksum")
+              if bundle.get("enabled") and not bundle.get("asset_url"):
+                  problems.append(f"{name}: bundle enabled without an asset url")
+              prebuilt = pdk.get("prebuilt", {})
+              if prebuilt.get("enabled") and not prebuilt.get("version"):
+                  problems.append(f"{name}: prebuilt route without a pinned version")
+              digital = channel.get("digital_flow", {})
+              if digital.get("enabled") and ":" not in str(digital.get("image", "")):
+                  problems.append(f"{name}: digital flow image is not tagged")
+
+          version = pathlib.Path("VERSION").read_text(encoding="utf-8").strip()
+          if not version:
+              problems.append("VERSION is empty")
+
+          for problem in problems:
+              print(f"::error::{problem}")
+          sys.exit(1 if problems else 0)
+          PY
+
+  package:
+    name: Debian package
+    runs-on: ubuntu-latest
+    needs: [tests]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the package
+        run: bash scripts/build_deb.sh
+
+      - name: Inspect the result
+        run: |
+          deb=$(ls dist/*.deb)
+          echo "== $deb"
+          dpkg-deb -I "$deb"
+          # The maintainer-built PDK bundle must never reappear in a package.
+          if dpkg-deb -c "$deb" | grep -q "tt-pdk-sky130a"; then
+            echo "::error::a maintainer-built PDK bundle is present in the package"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sky130-flow-gui-deb
+          path: dist/*.deb
+          retention-days: 14
