@@ -2,6 +2,26 @@
 
 ## 0.4.0 — 2026-09-20
 
+### Runs can be compared against each other
+
+`Comparar con...` next to the previous-runs list overlays a recorded run on the
+one on screen: same colour per signal, dashed for the reference, so the current
+run stays the one you read first. Alongside it the log reports how far each
+shared signal moved, largest first.
+
+Two runs rarely land on the same time points — a different timestep, a longer
+sweep, or a post-layout netlist with parasitics all shift the sample grid — so
+the reference is resampled onto the current run's axis before anything is
+subtracted, and only the window both runs actually cover is measured. Signals
+present in only one of the two are listed rather than silently dropped.
+
+```
+Comparando contra: [OK] 20 sep 15:11 · rc_a.spice
+  i(v1):  Δmax 0.0001442, RMS 9.739e-05 (57.83%)
+  v(out): Δmax 0.1442,    RMS 0.09739   (7.27%)
+  v(in):  Δmax 0,         RMS 0         (0.00%)
+```
+
 ### Failed simulations were reported as successful
 
 ngspice writes its diagnostics to the log file named by `-o`, not to stdout.

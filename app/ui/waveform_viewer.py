@@ -100,6 +100,8 @@ class WaveformViewer(QWidget):
         self._base_y_range: tuple[float, float] | None = None
         self._current_signal_name = ""
         self._overlay_signal_names: list[str] = []
+        self._reference_signals: dict[str, tuple[list[float], list[float]]] = {}
+        self._reference_label = ""
         self._legend = None
         self.plot.setLabel("bottom", "Time")
         self.plot.setLabel("left", "Value")
@@ -156,6 +158,20 @@ class WaveformViewer(QWidget):
             self._overlay_signal_names = []
             self.signal_stats.setText(pick(self.lang, "Sin datos", "No data"))
 
+    def set_reference(self, label: str, signals: dict[str, tuple[list[float], list[float]]]) -> None:
+        """Overlay another run's traces for comparison."""
+        self._reference_signals = dict(signals or {})
+        self._reference_label = label if self._reference_signals else ""
+        self._render_selected(self.signal_select.currentText())
+
+    def clear_reference(self) -> None:
+        self._reference_signals = {}
+        self._reference_label = ""
+        self._render_selected(self.signal_select.currentText())
+
+    def reference_label(self) -> str:
+        return self._reference_label
+
     def _render_selected(self, name: str) -> None:
         self.plot.clear()
         self._reset_legend()
@@ -165,21 +181,31 @@ class WaveformViewer(QWidget):
         self._current_signal_name = name
         selected_names = self._selected_signal_names(name)
         primary_x, primary_y = self._signals[name]
-        self.plot.setTitle(
-            f"{pick(self.lang, 'Forma de onda', 'Waveform')}  {', '.join(selected_names)}",
-            color="#0f172a",
-            size="12pt",
-        )
+        title = f"{pick(self.lang, 'Forma de onda', 'Waveform')}  {', '.join(selected_names)}"
+        if self._reference_label:
+            title += f"   vs  {self._reference_label}"
+        self.plot.setTitle(title, color=self._theme.text, size="12pt")
         self._apply_axis_labels(name)
         palette = ["#2563eb", "#ef4444", "#0f9d8a", "#d97706", "#7c3aed", "#db2777"]
         range_x: list[float] = []
         range_y: list[float] = []
         for index, signal_name in enumerate(selected_names):
             x, y = self._signals[signal_name]
-            pen = pg.mkPen(palette[index % len(palette)], width=2.2)
+            colour = palette[index % len(palette)]
+            pen = pg.mkPen(colour, width=2.2)
             self.plot.plot(x, y, pen=pen, name=signal_name)
             range_x.extend(x)
             range_y.extend(y)
+
+            # The same signal from the reference run, dashed and dimmed so the
+            # current run stays the one you read first.
+            reference = self._reference_signals.get(signal_name)
+            if reference is not None:
+                ref_x, ref_y = reference
+                ref_pen = pg.mkPen(colour, width=1.6, style=Qt.DashLine)
+                self.plot.plot(ref_x, ref_y, pen=ref_pen, name=f"{signal_name} · {self._reference_label}")
+                range_x.extend(ref_x)
+                range_y.extend(ref_y)
         self._capture_base_ranges(range_x, range_y)
         self._update_signal_stats(selected_names, primary_x, primary_y, range_y)
         self._apply_scale()

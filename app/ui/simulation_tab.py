@@ -22,12 +22,14 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
-    QFrame,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -47,6 +49,7 @@ from app.core.log_parser import LogParser
 from app.core.ngspice_raw_parser import NgspiceRawParser
 from app.core.error_advisor import analyze, format_advice, has_blocking_errors
 from app.core.output_manager import OutputPaths
+from app.core.run_compare import compare_runs
 from app.core.run_history import KIND_SIMULATION, RunHistory
 from app.core.settings_manager import AppSettings
 from app.core.spice_tools import (
@@ -121,6 +124,12 @@ class SimulationTab(QWidget):
         self.history_select.setPlaceholderText(pick(self.lang, "Sin simulaciones previas", "No previous simulations"))
         self.load_history_btn = QPushButton(pick(self.lang, "Cargar anterior", "Load Previous"))
         self.refresh_history_btn = QPushButton(pick(self.lang, "Refrescar historial", "Refresh History"))
+        self.compare_btn = QPushButton(pick(self.lang, "Comparar con...", "Compare with..."))
+        self.compare_btn.setToolTip(
+            pick(self.lang,
+                 "Superpone otra corrida sobre la actual y mide la diferencia.",
+                 "Overlay another run on the current one and measure the difference.")
+        )
 
         self.run_btn = QPushButton(pick(self.lang, "Correr", "Run"))
         self.run_btn.setObjectName("primaryAction")
@@ -374,6 +383,7 @@ class SimulationTab(QWidget):
         history_row.addWidget(self.history_select, 1)
         history_row.addWidget(self.load_history_btn)
         history_row.addWidget(self.refresh_history_btn)
+        history_row.addWidget(self.compare_btn)
         page_layout.addLayout(history_row)
 
         self.setup_section = CollapsibleSection(
@@ -806,6 +816,7 @@ class SimulationTab(QWidget):
         self.open_out_btn.clicked.connect(self.open_output_folder)
         self.load_history_btn.clicked.connect(self.load_selected_history)
         self.refresh_history_btn.clicked.connect(self.refresh_history)
+        self.compare_btn.clicked.connect(self.choose_comparison_run)
         self.add_probe_btn.clicked.connect(lambda: self._add_probe_row())
         self.refresh_points_btn.clicked.connect(self._refresh_probe_points)
         self.sim_type.currentIndexChanged.connect(self.sim_stack.setCurrentIndex)
@@ -1032,6 +1043,105 @@ class SimulationTab(QWidget):
     def _load_waveforms(self) -> None:
         raw_path = self._resolve_raw_path()
         self._load_waveforms_from_path(raw_path)
+
+    def choose_comparison_run(self) -> None:
+        """Pick a recorded run to overlay on the one currently displayed."""
+        if not self.wave.signal_names():
+            self._append_log(
+                pick(self.lang,
+                     "\nCarga primero una simulación para poder comparar.\n",
+                     "\nLoad a simulation first so there is something to compare against.\n")
+            )
+            return
+
+        outputs = self._last_outputs or self.outputs_getter()
+        records = [
+            record
+            for record in RunHistory(outputs.runs).records(kind=KIND_SIMULATION, limit=40)
+            if record.artifacts.get("raw") and Path(record.artifacts["raw"]).is_file()
+            and record.artifacts["raw"] != str(self._last_raw_path or "")
+        ]
+        if not records:
+            self._append_log(
+                pick(self.lang,
+                     "\nNo hay otras corridas guardadas con resultados para comparar.\n",
+                     "\nThere are no other recorded runs with results to compare against.\n")
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(pick(self.lang, "Comparar con otra corrida", "Compare with another run"))
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(
+            pick(self.lang, "Elige la corrida de referencia:", "Choose the reference run:")
+        ))
+        listing = QListWidget()
+        for record in records:
+            item = QListWidgetItem(record.describe())
+            item.setData(Qt.UserRole, record.artifacts["raw"])
+            item.setData(Qt.UserRole + 1, record.short_label())
+            item.setToolTip(record.summary or record.inputs.get("source", ""))
+            listing.addItem(item)
+        listing.setCurrentRow(0)
+        layout.addWidget(listing)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText(pick(self.lang, "Comparar", "Compare"))
+        clear_btn = buttons.addButton(
+            pick(self.lang, "Quitar comparación", "Clear comparison"), QDialogButtonBox.ResetRole
+        )
+        clear_btn.setEnabled(bool(self.wave.reference_label()))
+        layout.addWidget(buttons)
+
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        clear_btn.clicked.connect(lambda: (self.wave.clear_reference(), dialog.reject()))
+        listing.itemDoubleClicked.connect(lambda _item: dialog.accept())
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+        item = listing.currentItem()
+        if item is not None:
+            self._compare_with(
+                str(item.data(Qt.UserRole)), item.text(), str(item.data(Qt.UserRole + 1))
+            )
+
+    def _compare_with(self, raw_path: str, label: str, short_label: str = "") -> None:
+        """Load the reference run, overlay it, and report the differences."""
+        try:
+            reference = NgspiceRawParser.load_signals(raw_path)
+        except (OSError, ValueError) as exc:
+            self._append_log(
+                pick(self.lang, f"\nNo se pudo leer la corrida de referencia: {exc}\n",
+                     f"\nThe reference run could not be read: {exc}\n")
+            )
+            return
+
+        current = {name: self.wave.signal_data(name) for name in self.wave.signal_names()}
+        current = {name: data for name, data in current.items() if data}
+        comparison = compare_runs(current, reference)
+
+        self.wave.set_reference(short_label or label, reference)
+
+        lines = [pick(self.lang, f"\nComparando contra: {label}", f"\nComparing against: {label}")]
+        if not comparison.deltas:
+            lines.append(pick(self.lang,
+                              "  Las dos corridas no tienen señales en común.",
+                              "  The two runs share no signals."))
+        else:
+            if comparison.identical():
+                lines.append(pick(self.lang, "  Las señales compartidas son idénticas.",
+                                  "  The shared signals are identical."))
+            for delta in comparison.deltas[:8]:
+                lines.append(f"  {delta.describe()}")
+        if comparison.only_in_current:
+            lines.append(pick(self.lang, f"  Sólo en la actual: {', '.join(comparison.only_in_current)}",
+                              f"  Only in the current run: {', '.join(comparison.only_in_current)}"))
+        if comparison.only_in_reference:
+            lines.append(pick(self.lang, f"  Sólo en la referencia: {', '.join(comparison.only_in_reference)}",
+                              f"  Only in the reference: {', '.join(comparison.only_in_reference)}"))
+        self._append_log("\n".join(lines) + "\n")
+        self.send_status.emit(pick(self.lang, "Comparación lista", "Comparison ready"))
 
     def load_selected_history(self) -> None:
         raw_path = self.history_select.currentData()

@@ -71,6 +71,12 @@ class RunRecord:
         hours, minutes = divmod(minutes, 60)
         return f"{hours}h {minutes:02d}m"
 
+    def short_label(self) -> str:
+        """A compact name for a plot legend: what ran and when."""
+        stamp = time.strftime("%d %b %H:%M", time.localtime(self.started_at)) if self.started_at else ""
+        name = self.label or self.kind
+        return f"{name} · {stamp}".strip(" ·")
+
     def describe(self) -> str:
         """One line for a combo box or a list row."""
         stamp = time.strftime("%d %b %H:%M", time.localtime(self.started_at)) if self.started_at else "—"
