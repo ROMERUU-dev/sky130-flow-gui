@@ -27,6 +27,7 @@ import pyqtgraph as pg
 import pyqtgraph.exporters
 
 from app.core.i18n import pick
+from app.ui.theme import THEME_SYSTEM, Theme, resolve
 
 
 class WaveformViewer(QWidget):
@@ -34,9 +35,10 @@ class WaveformViewer(QWidget):
 
     signal_changed = Signal(str)
 
-    def __init__(self, language: str = "es") -> None:
+    def __init__(self, language: str = "es", theme: Theme | None = None) -> None:
         super().__init__()
         self.lang = language
+        self._theme = theme or resolve(THEME_SYSTEM)
         self.plot = pg.PlotWidget(title="")
         self.plot.showGrid(x=True, y=True)
         self.signal_select = QComboBox()
@@ -225,54 +227,52 @@ class WaveformViewer(QWidget):
         return self._signals.get(name)
 
     def _configure_plot_appearance(self) -> None:
+        theme = self._theme
         plot_item = self.plot.getPlotItem()
-        self.plot.setBackground("#ffffff")
+        self.plot.setBackground(theme.surface)
         plot_item.showAxis("left")
         plot_item.showAxis("bottom")
-        plot_item.getViewBox().setBackgroundColor("#ffffff")
+        plot_item.getViewBox().setBackgroundColor(theme.surface)
         self.plot.showGrid(x=True, y=True, alpha=0.24)
         for axis_name in ("left", "bottom"):
             axis = plot_item.getAxis(axis_name)
-            axis.setPen(pg.mkPen("#94a3b8", width=1.15))
-            axis.setTextPen(pg.mkPen("#334155"))
-            axis.setTickPen(pg.mkPen("#cbd5e1", width=1.0))
+            axis.setPen(pg.mkPen(theme.text_muted, width=1.15))
+            axis.setTextPen(pg.mkPen(theme.text_subtle))
+            axis.setTickPen(pg.mkPen(theme.border_strong, width=1.0))
         plot_item.getAxis("left").setStyle(tickTextOffset=10)
         plot_item.getAxis("bottom").setStyle(tickTextOffset=10)
 
     def _apply_viewer_style(self) -> None:
+        theme = self._theme
         self.setStyleSheet(
-            """
-            QLabel {
-                color: #334155;
-            }
-            QLabel#viewerLabel {
-                color: #2563eb;
-                font-weight: 800;
-            }
-            QComboBox, QDoubleSpinBox {
-                background: #ffffff;
-                border: 1px solid #dfe7f2;
+            f"""
+            QLabel#viewerLabel {{ color: {theme.accent}; font-weight: 800; }}
+            QComboBox, QDoubleSpinBox {{
+                background: {theme.surface};
+                border: 1px solid {theme.border_strong};
                 border-radius: 12px;
                 padding: 6px 8px;
                 min-height: 30px;
-            }
-            QPushButton {
-                background: #ffffff;
-                border: 1px solid transparent;
+                color: {theme.text};
+            }}
+            QPushButton {{
+                background: {theme.surface};
+                border: 1px solid {theme.border_strong};
                 border-radius: 12px;
                 padding: 8px 12px;
-                color: #111827;
+                color: {theme.text};
                 font-weight: 700;
-            }
-            QPushButton:hover {
-                background: #f5f8ff;
-                border: 1px solid #d6e4ff;
-            }
+            }}
+            QPushButton:hover {{
+                background: {theme.surface_alt};
+                border: 1px solid {theme.accent_border};
+            }}
             """
         )
-        self.empty_label.setStyleSheet("color: #64748b; font-size: 13px;")
+        self.empty_label.setStyleSheet(f"color: {theme.text_muted}; font-size: 13px;")
         self.signal_stats.setStyleSheet(
-            "background: #f8fbff; color: #334155; border: 1px solid #dfe7f2; "
+            f"background: {theme.surface_alt}; color: {theme.text}; "
+            f"border: 1px solid {theme.border}; "
             "border-radius: 12px; padding: 10px 12px; font-weight: 600;"
         )
 

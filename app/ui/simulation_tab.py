@@ -65,6 +65,7 @@ from app.services.em_netlist_instrumentation import (
     write_manual_instrumented_netlist,
     write_em_probe_map,
 )
+from app.ui.theme import resolve
 from app.ui.waveform_viewer import WaveformViewer
 from app.ui.widgets import CollapsibleSection, append_log
 
@@ -95,7 +96,8 @@ class SimulationTab(QWidget):
         )
         self.extra_directives = QTextEdit()
         self.extra_directives.setPlaceholderText(pick(self.lang, "Directivas extra opcionales (.meas, .ic, .param, etc.)", "Optional extra directives (.meas, .ic, .param, etc.)"))
-        self.wave = WaveformViewer(self.lang)
+        self._theme = resolve(settings.theme)
+        self.wave = WaveformViewer(self.lang, self._theme)
         self.spectrum_plot = pg.PlotWidget(title="")
         self.spectrum_plot.setLabel("bottom", pick(self.lang, "Frecuencia", "Frequency"), units="Hz")
         self.spectrum_plot.setLabel("left", "dB", units="dB")
@@ -763,154 +765,7 @@ class SimulationTab(QWidget):
         return card
 
     def _apply_visual_style(self) -> None:
-        self.setStyleSheet(
-            """
-            QFrame#heroCard, QFrame#summaryCard {
-                background: #ffffff;
-                border: 1px solid #e8eef7;
-                border-radius: 18px;
-            }
-            QFrame#summaryItem, QFrame#sectionCard, QFrame#subCard {
-                background: #ffffff;
-                border: 1px solid #e8eef7;
-                border-radius: 16px;
-            }
-            QLabel#pageTitle {
-                font-size: 24px;
-                font-weight: 800;
-                color: #2563eb;
-            }
-            QLabel#pageSubtitle {
-                font-size: 13px;
-                color: #667085;
-            }
-            QLabel#summaryLabel {
-                font-size: 11px;
-                font-weight: 700;
-                color: #7a8699;
-            }
-            QLabel#summaryValue {
-                font-size: 14px;
-                font-weight: 700;
-                color: #111827;
-            }
-            QLabel#sectionHeading {
-                font-size: 13px;
-                font-weight: 800;
-                color: #2563eb;
-            }
-            QLabel#hintLabel, QLabel#inlineHint {
-                color: #667085;
-                font-size: 12px;
-            }
-            QLabel {
-                color: #273142;
-            }
-            QScrollArea {
-                border: 0;
-                background: transparent;
-            }
-            QScrollBar:vertical {
-                background: transparent;
-                width: 12px;
-                margin: 4px 4px 4px 0;
-            }
-            QScrollBar::handle:vertical {
-                background: #d8e2f0;
-                min-height: 36px;
-                border-radius: 6px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #bfd0e8;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: transparent;
-                height: 0;
-            }
-            QScrollBar:horizontal {
-                background: transparent;
-                height: 12px;
-                margin: 0 4px 4px 4px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #d8e2f0;
-                min-width: 36px;
-                border-radius: 6px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background: #bfd0e8;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
-            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-                background: transparent;
-                width: 0;
-            }
-            QFrame#subCard {
-                background: #fbfdff;
-            }
-            QToolButton {
-                background: #ffffff;
-                border: 1px solid transparent;
-                border-radius: 14px;
-                padding: 10px 12px;
-                color: #1f2937;
-                font-weight: 800;
-                text-align: left;
-            }
-            QToolButton:hover {
-                background: #f8fbff;
-                border: 1px solid #d6e4ff;
-            }
-            QLineEdit, QComboBox, QTextEdit, QDoubleSpinBox, QTableWidget {
-                background: #ffffff;
-                border: 1px solid #dfe7f2;
-                border-radius: 12px;
-                padding: 7px 9px;
-                color: #111827;
-            }
-            QComboBox {
-                combobox-popup: 0;
-            }
-            QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QDoubleSpinBox:focus, QTableWidget:focus {
-                border: 1px solid #93c5fd;
-            }
-            QComboBox QAbstractItemView#comboPopupView {
-                background: #ffffff;
-                color: #111827;
-                border: 1px solid #dfe7f2;
-                border-radius: 12px;
-                padding: 6px;
-                outline: 0;
-                selection-background-color: #dbeafe;
-                selection-color: #111827;
-            }
-            QComboBox QAbstractItemView#comboPopupView::item {
-                min-height: 30px;
-                padding: 6px 10px;
-                border-radius: 8px;
-            }
-            QComboBox QAbstractItemView#comboPopupView::item:hover {
-                background: #f5f8ff;
-            }
-            QComboBox QAbstractItemView#comboPopupView::item:selected {
-                background: #dbeafe;
-                color: #111827;
-            }
-            QPushButton, QToolButton {
-                background: #ffffff;
-                border: 1px solid transparent;
-                border-radius: 12px;
-                padding: 8px 13px;
-                color: #111827;
-                font-weight: 600;
-            }
-            QPushButton:hover, QToolButton:hover {
-                background: #f5f8ff;
-                border: 1px solid #d6e4ff;
-            }
-            """
-        )
+        """Page styling now comes from the themed window stylesheet."""
 
     def _build_visualization_options(self) -> QWidget:
         card = self._build_section_card()

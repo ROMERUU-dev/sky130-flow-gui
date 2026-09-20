@@ -7,6 +7,7 @@ from dataclasses import asdict
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QHBoxLayout,
@@ -31,6 +32,7 @@ from app.core.integration_manager import IntegrationManager
 from app.core.settings_manager import AppSettings
 from app.core.update_manager import UpdateManager
 from app.ui.setup_tab import SetupTab
+from app.ui.theme import THEME_DARK, THEME_LIGHT, THEME_SYSTEM, hint_style, resolve
 from app.ui.widgets import browse_dir, browse_file
 
 
@@ -44,6 +46,7 @@ class PreferencesTab(QWidget):
         super().__init__()
         self.settings = settings
         self.lang = settings.language
+        self._theme = resolve(settings.theme)
         self.validator = EnvValidator()
         self.update_mgr = UpdateManager()
         self.integration_mgr = IntegrationManager()
@@ -54,6 +57,17 @@ class PreferencesTab(QWidget):
         self.language_combo.addItem("Español", "es")
         self.language_combo.addItem("English", "en")
         self.language_combo.setCurrentIndex(max(0, self.language_combo.findData(self.settings.language)))
+
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem(pick(self.lang, "Seguir al sistema", "Follow system"), THEME_SYSTEM)
+        self.theme_combo.addItem(pick(self.lang, "Claro", "Light"), THEME_LIGHT)
+        self.theme_combo.addItem(pick(self.lang, "Oscuro", "Dark"), THEME_DARK)
+        self.theme_combo.setCurrentIndex(max(0, self.theme_combo.findData(self.settings.theme)))
+
+        self.prompt_project_check = QCheckBox(
+            pick(self.lang, "Preguntar por proyecto al iniciar", "Ask for a project on startup")
+        )
+        self.prompt_project_check.setChecked(self.settings.prompt_project_on_start)
         self.status_table = QTableWidget(0, 3)
         self.status_table.setHorizontalHeaderLabels(
             [
@@ -122,6 +136,8 @@ class PreferencesTab(QWidget):
         pdk = asdict(self.settings.pdk_paths)
 
         form.addRow(pick(self.lang, "Idioma", "Language"), self.language_combo)
+        form.addRow(pick(self.lang, "Tema", "Theme"), self.theme_combo)
+        form.addRow("", self.prompt_project_check)
         form.addRow(QLabel(pick(self.lang, "Reinicia la app para aplicar el cambio de idioma.", "Restart the app to apply the language change.")))
 
         for key, value in tools.items():
@@ -142,7 +158,7 @@ class PreferencesTab(QWidget):
             )
         )
         pdk_usage_note.setWordWrap(True)
-        pdk_usage_note.setStyleSheet("color: #667085;")
+        pdk_usage_note.setStyleSheet(hint_style(self._theme))
         general_layout.addWidget(pdk_usage_note)
 
         btns = QHBoxLayout()
@@ -182,44 +198,6 @@ class PreferencesTab(QWidget):
         self.subtabs.addTab(self.general_page, pick(self.lang, "General", "General"))
         self.subtabs.addTab(self.setup_tab, pick(self.lang, "Entorno", "Setup"))
         layout.addWidget(self.subtabs)
-        self.setStyleSheet(
-            """
-            QTabWidget#preferencesSubtabs::pane {
-                border: 1px solid #e8eef7;
-                border-radius: 18px;
-                background: #ffffff;
-                margin-top: 8px;
-            }
-            QTabWidget#preferencesSubtabs QTabBar {
-                background: transparent;
-            }
-            QTabWidget#preferencesSubtabs QWidget#preferencesGeneralPage,
-            QTabWidget#preferencesSubtabs QWidget#preferencesSetupPage {
-                background: #ffffff;
-            }
-            QTabWidget#preferencesSubtabs QTabBar::tab {
-                background: #f8fafc;
-                color: #475569;
-                border: 1px solid #e5e7eb;
-                border-bottom: 0;
-                padding: 10px 16px;
-                margin-right: 6px;
-                border-top-left-radius: 12px;
-                border-top-right-radius: 12px;
-                font-weight: 700;
-            }
-            QTabWidget#preferencesSubtabs QTabBar::tab:selected {
-                background: #ffffff;
-                color: #1d4ed8;
-                border-color: #d8e5ff;
-            }
-            QTabWidget#preferencesSubtabs QTabBar::tab:hover:!selected {
-                background: #eef5ff;
-                color: #1d4ed8;
-            }
-            """
-        )
-
     def _wire_runner(self) -> None:
         self.cmd_runner.started.connect(lambda cmd: self.ops_log.append(f"$ {cmd}"))
         self.cmd_runner.line_output.connect(lambda txt: self.ops_log.insertPlainText(txt))
@@ -232,6 +210,8 @@ class PreferencesTab(QWidget):
             target = self.settings.tool_paths if section == "tools" else self.settings.pdk_paths
             setattr(target, attr, value)
         self.settings.language = str(self.language_combo.currentData() or "es")
+        self.settings.theme = str(self.theme_combo.currentData() or THEME_SYSTEM)
+        self.settings.prompt_project_on_start = self.prompt_project_check.isChecked()
         self.refresh_validation()
         self.settings_updated.emit(self.settings)
 

@@ -28,6 +28,7 @@ from app.core.env_probe import EnvProbe
 from app.core.env_validator import EnvValidator
 from app.core.i18n import pick
 from app.core.settings_manager import AppSettings
+from app.ui.theme import badge_style, heading_style, hint_style, resolve
 from app.core.setup_manager import SetupManager
 
 
@@ -47,6 +48,7 @@ class SetupTab(QWidget):
         super().__init__()
         self.settings = settings
         self.lang = settings.language
+        self._theme = resolve(settings.theme)
         self.validator = EnvValidator()
         self.setup_mgr = SetupManager()
         self.runner = CommandRunner()
@@ -159,7 +161,7 @@ class SetupTab(QWidget):
         layout.setSpacing(14)
 
         title = QLabel(pick(self.lang, "Asistente de entorno", "Setup Assistant"))
-        title.setStyleSheet("font-size: 22px; font-weight: 800; color: #2563eb;")
+        title.setStyleSheet(heading_style(self._theme, 22))
         subtitle = QLabel(
             pick(
                 self.lang,
@@ -168,7 +170,7 @@ class SetupTab(QWidget):
             )
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("color: #667085;")
+        subtitle.setStyleSheet(hint_style(self._theme))
         layout.addWidget(title)
         layout.addWidget(subtitle)
         activity_row = QHBoxLayout()
@@ -197,7 +199,7 @@ class SetupTab(QWidget):
         step_card_layout.setContentsMargins(12, 12, 12, 12)
         step_card_layout.setSpacing(10)
         step_heading = QLabel(pick(self.lang, "Pasos", "Steps"))
-        step_heading.setStyleSheet("font-weight: 800; color: #2563eb;")
+        step_heading.setStyleSheet(f"font-weight: 800; color: {self._theme.accent};")
         step_card_layout.addWidget(step_heading)
         step_card_layout.addWidget(self.step_list)
         content_row.addWidget(step_card, 0)
@@ -223,86 +225,6 @@ class SetupTab(QWidget):
         self.step_stack.addWidget(self._build_install_page())
         self.step_stack.addWidget(self._build_apply_page())
         self.step_stack.addWidget(self._build_validate_page())
-
-        self.setStyleSheet(
-            """
-            QFrame#setupSidebar, QFrame#setupPageCard {
-                background: #ffffff;
-                border: 1px solid #e8eef7;
-                border-radius: 18px;
-            }
-            QListWidget#setupSteps {
-                background: transparent;
-                border: 0;
-                outline: 0;
-            }
-            QListWidget#setupSteps::item {
-                min-height: 38px;
-                padding: 10px 12px;
-                margin: 0 0 6px 0;
-                border: 1px solid transparent;
-                border-radius: 12px;
-                font-weight: 700;
-                color: #475569;
-            }
-            QListWidget#setupSteps::item:selected {
-                background: #f5f9ff;
-                border: 1px solid #d8e5ff;
-                color: #2563eb;
-            }
-            QProgressBar {
-                background: #eef4fb;
-                border: 0;
-                border-radius: 7px;
-                min-height: 10px;
-                max-height: 10px;
-            }
-            QProgressBar::chunk {
-                background: #2563eb;
-                border-radius: 7px;
-            }
-            QFrame#statusCard {
-                background: #fbfdff;
-                border: 1px solid #e1ebf8;
-                border-radius: 14px;
-            }
-            QLabel#statusCardTitle {
-                color: #667085;
-                font-size: 12px;
-                font-weight: 700;
-            }
-            QLabel#statusCardValue {
-                color: #0f172a;
-                font-size: 15px;
-                font-weight: 800;
-            }
-            QLabel#readyBadge {
-                color: #0f9d8a;
-                background: #ecfdf3;
-                border: 1px solid #b7ebcf;
-                border-radius: 11px;
-                padding: 5px 10px;
-                font-weight: 800;
-            }
-            QLabel#activityBadge {
-                min-width: 28px;
-                max-width: 28px;
-                min-height: 28px;
-                max-height: 28px;
-                border-radius: 14px;
-                font-weight: 900;
-                font-size: 15px;
-                padding: 0;
-            }
-            QLabel#activityText {
-                color: #475467;
-                font-weight: 700;
-            }
-            QLabel {
-                color: #344054;
-            }
-            """
-        )
 
     def _build_review_page(self) -> QWidget:
         page = QWidget()
@@ -438,7 +360,7 @@ class SetupTab(QWidget):
         cards.addWidget(self._build_status_card(pick(self.lang, "General", "Overall"), self.card_overall_value), 1, 1)
         layout.addLayout(cards)
         self.ready_badge.setObjectName("readyBadge")
-        self.ready_title.setStyleSheet("font-size: 20px; font-weight: 800; color: #2563eb;")
+        self.ready_title.setStyleSheet(heading_style(self._theme, 20))
         ready_row = QHBoxLayout()
         ready_row.addWidget(self.ready_badge)
         ready_row.addStretch(1)
@@ -453,19 +375,19 @@ class SetupTab(QWidget):
             )
         )
         final_hint.setWordWrap(True)
-        final_hint.setStyleSheet("color: #475467; font-weight: 600;")
+        final_hint.setStyleSheet(f"color: {self._theme.text_subtle}; font-weight: 600;")
         layout.addWidget(final_hint)
         return page
 
     def _page_heading(self, text: str) -> QLabel:
         label = QLabel(text)
-        label.setStyleSheet("font-size: 18px; font-weight: 800; color: #2563eb;")
+        label.setStyleSheet(heading_style(self._theme, 18))
         return label
 
     def _page_hint(self, text: str) -> QLabel:
         label = QLabel(text)
         label.setWordWrap(True)
-        label.setStyleSheet("color: #667085;")
+        label.setStyleSheet(hint_style(self._theme))
         return label
 
     def _build_status_card(self, title: str, value_label: QLabel) -> QFrame:
@@ -1174,9 +1096,7 @@ class SetupTab(QWidget):
 
     def _set_activity_idle(self) -> None:
         self.activity_badge.setObjectName("activityBadge")
-        self.activity_badge.setStyleSheet(
-            "background: #f2f4f7; color: #667085; border: 1px solid #e4e7ec;"
-        )
+        self.activity_badge.setStyleSheet(badge_style(self._theme, "idle"))
         self.activity_badge.setText("•")
         self.activity_text.setObjectName("activityText")
         self.activity_text.setText(pick(self.lang, "Esperando acciones del asistente", "Waiting for setup actions"))
@@ -1185,9 +1105,7 @@ class SetupTab(QWidget):
         self._active_operations += 1
         self._spinner_index = 0
         self.activity_badge.setText(self._spinner_frames[self._spinner_index])
-        self.activity_badge.setStyleSheet(
-            "background: #eef4ff; color: #2563eb; border: 1px solid #cfe0ff;"
-        )
+        self.activity_badge.setStyleSheet(badge_style(self._theme, "busy"))
         self.activity_text.setText(message)
         if not self._activity_timer.isActive():
             self._activity_timer.start()
@@ -1200,11 +1118,7 @@ class SetupTab(QWidget):
             return
         self._activity_timer.stop()
         self.activity_badge.setText("✓" if success else "!")
-        self.activity_badge.setStyleSheet(
-            "background: #ecfdf3; color: #0f9d8a; border: 1px solid #b7ebcf;"
-            if success
-            else "background: #fef3f2; color: #d92d20; border: 1px solid #fecdca;"
-        )
+        self.activity_badge.setStyleSheet(badge_style(self._theme, "ok" if success else "error"))
         self.activity_text.setText(message)
         self._set_action_buttons_enabled(True)
         QTimer.singleShot(1800, self._restore_idle_if_quiet)

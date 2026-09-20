@@ -34,6 +34,9 @@ class AppSettings:
     recent_projects: list[str] = field(default_factory=list)
     last_project: str = ""
     language: str = "es"
+    theme: str = "system"
+    prompt_project_on_start: bool = True
+    window_geometry: str = ""
 
 
 class SettingsManager:
@@ -67,6 +70,9 @@ class SettingsManager:
             recent_projects=list(recent_projects),
             last_project=self._settings.value("projects/last", "", type=str),
             language=self._settings.value("ui/language", "es", type=str),
+            theme=self._settings.value("ui/theme", "system", type=str),
+            prompt_project_on_start=self._settings.value("ui/prompt_project_on_start", True, type=bool),
+            window_geometry=self._settings.value("ui/window_geometry", "", type=str),
         )
 
     def save(self, app_settings: AppSettings) -> None:
@@ -86,6 +92,9 @@ class SettingsManager:
         self._settings.setValue("projects/recent", app_settings.recent_projects)
         self._settings.setValue("projects/last", app_settings.last_project)
         self._settings.setValue("ui/language", app_settings.language)
+        self._settings.setValue("ui/theme", app_settings.theme)
+        self._settings.setValue("ui/prompt_project_on_start", app_settings.prompt_project_on_start)
+        self._settings.setValue("ui/window_geometry", app_settings.window_geometry)
         self._settings.sync()
 
     def export_to_dict(self, app_settings: AppSettings) -> dict[str, Any]:
@@ -99,6 +108,7 @@ class SettingsManager:
             },
             "ui": {
                 "language": app_settings.language,
+                "theme": app_settings.theme,
             },
         }
 

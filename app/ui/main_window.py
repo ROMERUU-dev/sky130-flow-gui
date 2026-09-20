@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QByteArray, Qt, QTimer
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -40,6 +42,7 @@ from app.ui.lvs_tab import LvsTab
 from app.ui.preferences_tab import PreferencesTab
 from app.ui.project_tab import ProjectTab
 from app.ui.simulation_tab import SimulationTab
+from app.ui.theme import LIGHT, build_palette, build_stylesheet, heading_style, resolve
 
 
 class MainWindow(QMainWindow):
@@ -48,6 +51,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("SKY130 Flow")
+        self.setMinimumSize(1024, 640)
         self.resize(1400, 900)
 
         self.settings_mgr = SettingsManager()
@@ -59,13 +63,14 @@ class MainWindow(QMainWindow):
 
         self.root = QWidget()
         self.root_layout = QHBoxLayout(self.root)
-        self.root_layout.setContentsMargins(18, 12, 18, 12)
-        self.root_layout.setSpacing(18)
+        self.root_layout.setContentsMargins(12, 10, 12, 10)
+        self.root_layout.setSpacing(12)
 
         self.sidebar = QListWidget()
         self.sidebar.setObjectName("sidebarNav")
-        self.sidebar.setSpacing(6)
+        self.sidebar.setSpacing(3)
         self.sidebar.setUniformItemSizes(True)
+        self.sidebar.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         self.tabs = QTabWidget()
         self.tabs.tabBar().hide()
@@ -73,9 +78,14 @@ class MainWindow(QMainWindow):
         self.sidebar_card = QFrame()
         self.sidebar_card.setObjectName("sidebarCard")
         self.sidebar_layout = QVBoxLayout(self.sidebar_card)
-        self.sidebar_layout.setContentsMargins(12, 12, 12, 12)
-        self.sidebar_layout.setSpacing(10)
+        self.sidebar_layout.setContentsMargins(8, 8, 8, 8)
+        self.sidebar_layout.setSpacing(8)
         self.sidebar_layout.addWidget(self.sidebar)
+        # The navigation holds seven short labels. Letting it claim ~280px
+        # pushed the working area below the width the tab content needs and
+        # forced a horizontal scrollbar at the default window size.
+        self.sidebar_card.setMinimumWidth(168)
+        self.sidebar_card.setMaximumWidth(208)
 
         self.root_layout.addWidget(self.sidebar_card, 0)
         self.root_layout.addWidget(self.tabs, 1)
@@ -90,7 +100,31 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._apply_window_style()
         self._wire_navigation()
-        QTimer.singleShot(250, self._prompt_for_project_on_start)
+        self._install_shortcuts()
+        self._restore_geometry()
+        if self.app_settings.prompt_project_on_start:
+            QTimer.singleShot(250, self._prompt_for_project_on_start)
+
+    def _install_shortcuts(self) -> None:
+        """Ctrl+1..7 jump straight to a section."""
+        for index in range(self.tabs.count()):
+            shortcut = QShortcut(QKeySequence(f"Ctrl+{index + 1}"), self)
+            shortcut.activated.connect(lambda idx=index: self.tabs.setCurrentIndex(idx))
+
+    def _restore_geometry(self) -> None:
+        saved = self.app_settings.window_geometry
+        if not saved:
+            return
+        try:
+            self.restoreGeometry(QByteArray.fromBase64(saved.encode("ascii")))
+        except (ValueError, UnicodeEncodeError):
+            pass
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        """Remember where the window was before shutting down."""
+        self.app_settings.window_geometry = bytes(self.saveGeometry().toBase64()).decode("ascii")
+        self.settings_mgr.save(self.app_settings)
+        super().closeEvent(event)
 
     def _build_tabs(self) -> None:
         self.project_tab = ProjectTab(self.project_mgr, self.app_settings.recent_projects, self.app_settings.language)
@@ -154,186 +188,39 @@ class MainWindow(QMainWindow):
         self.tabs.setDocumentMode(True)
         if self.menuBar() is not None:
             self.menuBar().hide()
-        self.setStyleSheet(
-            """
-            QMainWindow {
-                background: #ffffff;
-            }
-            QWidget {
-                color: #172033;
-            }
-            QToolBar#mainToolbar {
-                background: #ffffff;
-                border: 0;
-                border-bottom: 1px solid #eef2f7;
-                spacing: 8px;
-                padding: 10px 18px 8px 18px;
-            }
-            QToolBar#mainToolbar QToolButton {
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: 12px;
-                padding: 9px 15px;
-                color: #1d4ed8;
-                font-weight: 700;
-            }
-            QToolBar#mainToolbar QToolButton:hover {
-                background: #eef5ff;
-                border: 1px solid #cfe0ff;
-            }
-            QToolBar#mainToolbar QToolButton#toolbarMagicButton {
-                color: #7c3aed;
-            }
-            QToolBar#mainToolbar QToolButton#toolbarMagicButton:hover {
-                background: #f6f0ff;
-                border: 1px solid #e2d4ff;
-            }
-            QFrame#sidebarCard {
-                background: #ffffff;
-                border: 1px solid #eef2f7;
-                border-radius: 18px;
-            }
-            QTabWidget::pane {
-                border: 0;
-                background: #ffffff;
-            }
-            QListWidget#sidebarNav {
-                background: transparent;
-                border: 0;
-                outline: 0;
-                padding: 2px;
-            }
-            QListWidget#sidebarNav::item {
-                min-height: 42px;
-                padding: 10px 14px;
-                margin: 0;
-                border: 1px solid transparent;
-                border-radius: 14px;
-                font-weight: 700;
-                color: #475569;
-            }
-            QListWidget#sidebarNav::item:selected {
-                background: #f5f9ff;
-                border: 1px solid #d8e5ff;
-            }
-            QListWidget#sidebarNav::item:hover {
-                background: #f8fafc;
-                border: 1px solid #edf2f7;
-            }
-            QStatusBar {
-                background: #ffffff;
-                border-top: 1px solid #eef2f7;
-                color: #475569;
-            }
-            QScrollArea {
-                border: 0;
-                background: transparent;
-            }
-            QScrollBar:vertical {
-                background: transparent;
-                width: 12px;
-                margin: 4px 4px 4px 0;
-            }
-            QScrollBar::handle:vertical {
-                background: #d7e2f0;
-                min-height: 36px;
-                border-radius: 6px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #bfd0e8;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: transparent;
-                height: 0;
-            }
-            QScrollBar:horizontal {
-                background: transparent;
-                height: 12px;
-                margin: 0 4px 4px 4px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #d7e2f0;
-                min-width: 36px;
-                border-radius: 6px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background: #bfd0e8;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
-            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-                background: transparent;
-                width: 0;
-            }
-            QGroupBox {
-                background: #ffffff;
-                border: 1px solid #edf2f7;
-                border-radius: 14px;
-                margin-top: 14px;
-                padding-top: 14px;
-                font-weight: 700;
-                color: #1d4ed8;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 14px;
-                padding: 0 6px;
-                color: #1d4ed8;
-                background: transparent;
-            }
-            QLineEdit, QComboBox, QTextEdit, QDoubleSpinBox, QTableWidget {
-                background: #ffffff;
-                border: 1px solid #e6ebf2;
-                border-radius: 12px;
-                padding: 7px 9px;
-                color: #172033;
-                selection-background-color: #dbeafe;
-                selection-color: #172033;
-            }
-            QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QDoubleSpinBox:focus, QTableWidget:focus {
-                border: 1px solid #93c5fd;
-            }
-            QPushButton, QToolButton {
-                background: #ffffff;
-                border: 1px solid transparent;
-                border-radius: 12px;
-                padding: 8px 13px;
-                color: #172033;
-                font-weight: 600;
-            }
-            QPushButton:hover, QToolButton:hover {
-                background: #f8fafc;
-                border: 1px solid #dde5ef;
-            }
-            QPushButton:disabled, QToolButton:disabled {
-                background: #fafbfd;
-                color: #9aa3b2;
-                border: 1px solid transparent;
-            }
-            QLabel {
-                color: #344054;
-            }
-            """
-        )
+        self._theme = resolve(self.app_settings.theme)
+        self.setStyleSheet(build_stylesheet(self._theme))
+        app = QApplication.instance()
+        if app is not None:
+            app.setPalette(build_palette(self._theme))
+        self._repaint_sidebar_accents()
+
+    def apply_theme(self, preference: str) -> None:
+        """Repaint the whole window for a new theme preference, without a restart."""
+        self.app_settings.theme = preference
+        self._apply_window_style()
+
+    SIDEBAR_ACCENTS = {
+        "light": ("#2563eb", "#e76f51", "#0f9d8a", "#d97706", "#7c3aed", "#059669", "#db2777"),
+        "dark": ("#7fa9ff", "#ff9f80", "#4fd1bd", "#fbbf24", "#b696ff", "#34d399", "#f472b6"),
+    }
 
     def _populate_sidebar(self) -> None:
         self.sidebar.clear()
-        accent_colors = [
-            "#2563eb",  # Simulation
-            "#e76f51",  # LVS
-            "#0f9d8a",  # Extraction
-            "#d97706",  # Antenna
-            "#7c3aed",  # EM
-            "#0891b2",  # Setup
-            "#059669",  # Project
-            "#db2777",  # Preferences
-        ]
         for index in range(self.tabs.count()):
             item = QListWidgetItem(self.tabs.tabText(index))
-            item.setForeground(QColor(accent_colors[index % len(accent_colors)]))
             self.sidebar.addItem(item)
+        self._repaint_sidebar_accents()
         if self.sidebar.count():
             self.sidebar.setCurrentRow(self.tabs.currentIndex())
+
+    def _repaint_sidebar_accents(self) -> None:
+        """Tint each navigation entry with a theme-appropriate accent."""
+        accents = self.SIDEBAR_ACCENTS[getattr(self, "_theme", LIGHT).mode]
+        for index in range(self.sidebar.count()):
+            item = self.sidebar.item(index)
+            if item is not None:
+                item.setForeground(QColor(accents[index % len(accents)]))
 
     def _wire_navigation(self) -> None:
         self.sidebar.currentRowChanged.connect(self.tabs.setCurrentIndex)
@@ -354,7 +241,7 @@ class MainWindow(QMainWindow):
                 "Which project are you working on?",
             )
         )
-        title.setStyleSheet("font-size: 18px; font-weight: 800; color: #2563eb;")
+        title.setStyleSheet(heading_style(self._theme, 18))
         layout.addWidget(title)
 
         current_text = self._current_project or pick(self.app_settings.language, "Workspace local sin proyecto", "Local workspace without a project")
@@ -375,6 +262,15 @@ class MainWindow(QMainWindow):
         actions.addWidget(create_btn)
         actions.addWidget(workspace_btn)
         layout.addLayout(actions)
+
+        remember = QCheckBox(
+            pick(
+                self.app_settings.language,
+                "No volver a preguntar al iniciar",
+                "Do not ask again on startup",
+            )
+        )
+        layout.addWidget(remember)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText(pick(self.app_settings.language, "Continuar", "Continue"))
@@ -416,6 +312,10 @@ class MainWindow(QMainWindow):
         buttons.rejected.connect(dialog.reject)
         dialog.exec()
 
+        if remember.isChecked():
+            self.app_settings.prompt_project_on_start = False
+            self.settings_mgr.save(self.app_settings)
+
     def _open_xschem(self) -> None:
         launch = XschemLaunchBuilder(self.app_settings).build(self._current_project)
         try:
@@ -456,8 +356,11 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentWidget(self.sim_tab)
 
     def _on_settings_updated(self, new_settings: AppSettings) -> None:
+        theme_changed = new_settings.theme != self.app_settings.theme
         self.app_settings = new_settings
         self.settings_mgr.save(self.app_settings)
+        if theme_changed:
+            self._apply_window_style()
         self.set_status(
             pick(
                 self.app_settings.language,
