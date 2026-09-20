@@ -43,37 +43,9 @@ class _DummyQt:
     WA_StyledBackground = 3
 
 
-qtcore_stub = SimpleNamespace(
-    QObject=_DummyWidget,
-    QCoreApplication=object,
-    QProcess=_DummyQProcess,
-    QSettings=object,
-    QTimer=object,
-    Qt=_DummyQt,
-    Signal=_DummySignal,
-)
-qtwidgets_stub = SimpleNamespace(
-    QComboBox=_DummyWidget,
-    QFrame=_DummyWidget,
-    QGridLayout=_DummyWidget,
-    QHBoxLayout=_DummyWidget,
-    QLabel=_DummyWidget,
-    QListWidget=_DummyWidget,
-    QListWidgetItem=_DummyWidget,
-    QProgressBar=_DummyWidget,
-    QPushButton=_DummyWidget,
-    QScrollArea=_DummyWidget,
-    QSizePolicy=_DummyWidget,
-    QStackedWidget=_DummyWidget,
-    QTableWidget=_DummyWidget,
-    QTableWidgetItem=_DummyWidget,
-    QTextEdit=_DummyWidget,
-    QVBoxLayout=_DummyWidget,
-    QWidget=_DummyWidget,
-)
-sys.modules["PySide6"] = SimpleNamespace(QtCore=qtcore_stub, QtWidgets=qtwidgets_stub)
-sys.modules["PySide6.QtCore"] = qtcore_stub
-sys.modules["PySide6.QtWidgets"] = qtwidgets_stub
+from tests.qt_stubs import install_qtwidgets_stub
+
+install_qtwidgets_stub(_DummyWidget)
 
 from app.ui.setup_tab import SetupTab
 

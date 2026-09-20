@@ -60,8 +60,8 @@ apt-get install -y "${APT_PACKAGES[@]}"
 echo
 echo "Package installation finished."
 echo
-echo "Installing official Magic 8.3.634 source release for current SKY130 techfiles..."
-MAGIC_INSTALLER="$REPO_ROOT/scripts/install_magic_8_3_634_ubuntu.sh"
+echo "Installing a current upstream Magic release for current SKY130 techfiles..."
+MAGIC_INSTALLER="$REPO_ROOT/scripts/install_magic_ubuntu.sh"
 if [ ! -f "$MAGIC_INSTALLER" ]; then
   echo "Magic source installer not found at $MAGIC_INSTALLER."
   exit 1
@@ -72,12 +72,13 @@ echo
 echo "Magic source installation finished."
 echo
 echo "System bootstrap completed."
-echo "This script intentionally does NOT create or modify $REPO_ROOT/.venv."
-echo "Create the Python environment later as the normal user, for example:"
-echo "  cd '$REPO_ROOT'"
-echo "  python3 -m venv .venv"
-echo "  .venv/bin/python -m pip install --upgrade pip"
-echo "  .venv/bin/python -m pip install -r requirements.txt"
+echo "This script intentionally does NOT touch the user Python environment."
+echo "Prepare it afterwards as the normal user, from the app Preferences page"
+echo "or with:"
+echo "  python3 -m app.core.python_env repair --app-root '$REPO_ROOT'"
+echo
+echo "The SKY130 PDK is installed separately. Recommended route:"
+echo "  bash '$REPO_ROOT/scripts/install_sky130_pdk_ciel.sh'"
 echo
 echo "Do not mix pkexec/sudo with user-owned .venv creation inside the repository."
 

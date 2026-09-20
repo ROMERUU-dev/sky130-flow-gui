@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import asdict
 
 from PySide6.QtCore import Qt, Signal
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.command_runner import CommandRunner, CommandSpec
+from app.core.env_probe import EnvProbe
 from app.core.env_validator import EnvValidator
 from app.core.i18n import pick
 from app.core.integration_manager import IntegrationManager
@@ -79,7 +81,9 @@ class PreferencesTab(QWidget):
         self._wire_runner()
         self.setup_tab.settings_updated.connect(self.settings_updated.emit)
         self.setup_tab.send_status.connect(self.send_status.emit)
-        self.refresh_validation()
+        self._probe = EnvProbe(self)
+        self._probe.finished.connect(lambda _diagnosis: self.refresh_validation())
+        self._probe.start(self.settings, self.lang)
 
     def _add_path_row(self, form: QFormLayout, key: str, label: str, value: str, is_dir: bool = False) -> None:
         edit = QLineEdit(value)
@@ -144,12 +148,15 @@ class PreferencesTab(QWidget):
         btns = QHBoxLayout()
         save = QPushButton(pick(self.lang, "Guardar preferencias", "Save Preferences"))
         validate = QPushButton(pick(self.lang, "Validar", "Validate"))
+        repair_python = QPushButton(pick(self.lang, "Crear/Reparar entorno Python", "Create/Repair Python Environment"))
         btns.addWidget(save)
         btns.addWidget(validate)
+        btns.addWidget(repair_python)
         general_layout.addLayout(btns)
 
         save.clicked.connect(self.save)
-        validate.clicked.connect(self.refresh_validation)
+        validate.clicked.connect(self.rescan_environment)
+        repair_python.clicked.connect(self.repair_python_environment)
 
         general_layout.addWidget(QLabel(pick(self.lang, "Validación de entorno", "Environment Validation")))
         general_layout.addWidget(self.status_table)
@@ -228,6 +235,11 @@ class PreferencesTab(QWidget):
         self.refresh_validation()
         self.settings_updated.emit(self.settings)
 
+    def rescan_environment(self) -> None:
+        """Re-probe the machine after something changed, without blocking the UI."""
+        EnvValidator.invalidate_cache()
+        self._probe.start(self.settings, self.lang, refresh=True)
+
     def refresh_validation(self) -> None:
         diagnosis = self.validator.diagnose(self.settings, lang=self.lang)
         rows = self.validator.validation_rows(diagnosis, lang=self.lang)
@@ -237,6 +249,18 @@ class PreferencesTab(QWidget):
             self.status_table.setItem(i, 1, QTableWidgetItem(row.status))
             self.status_table.setItem(i, 2, QTableWidgetItem(row.detail))
         self.status_table.resizeColumnsToContents()
+
+    def repair_python_environment(self) -> None:
+        """Run the user-only environment repair without blocking the Qt event loop."""
+        self._pending_status_check = False
+        self._last_action = "repair_python"
+        self.ops_log.append(pick(
+            self.lang,
+            "Preparando el entorno Python del usuario (sin sudo/pkexec)...\n",
+            "Preparing the user Python environment (without sudo/pkexec)...\n",
+        ))
+        command = [sys.executable, "-m", "app.core.python_env", "repair", "--app-root", str(self.validator.repo_root)]
+        self.cmd_runner.run(CommandSpec(command=command, cwd=str(self.validator.repo_root)))
 
     def check_updates(self) -> None:
         cmds = self.update_mgr.commands()
@@ -272,6 +296,8 @@ class PreferencesTab(QWidget):
             )
             self._pending_status_check = False
             self._last_action = ""
+            if action == "repair_python":
+                self.rescan_environment()
             return
 
         if action == "check":
@@ -285,6 +311,13 @@ class PreferencesTab(QWidget):
                     "\nUpdate applied (if remote changes existed). Restart the app.\n",
                 )
             )
+        elif action == "repair_python":
+            self.ops_log.append(pick(
+                self.lang,
+                "\nEntorno Python creado y validado correctamente.\n",
+                "\nPython environment created and validated successfully.\n",
+            ))
+            self.rescan_environment()
 
         self._last_action = ""
 

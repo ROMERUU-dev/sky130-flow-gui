@@ -10,9 +10,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-qtcore_stub = SimpleNamespace(QSettings=object)
-sys.modules.setdefault("PySide6", SimpleNamespace(QtCore=qtcore_stub))
-sys.modules.setdefault("PySide6.QtCore", qtcore_stub)
+from tests.qt_stubs import install_qtcore_stub
+
+install_qtcore_stub()
 
 from app.core.settings_manager import AppSettings
 from app.core.setup_manager import SetupManager
@@ -170,6 +170,18 @@ class SetupManagerTest(unittest.TestCase):
         self.assertTrue(summary.has_pinned_source)
         self.assertEqual(summary.missing_commands, ("autoconf", "tcsh"))
         self.assertTrue(summary.reusable_candidate_available)
+
+    def test_prebuilt_pdk_command_runs_unprivileged(self) -> None:
+        """The official PDK route must never ask for pkexec or sudo."""
+        command = SetupManager().pdk_prebuilt_install_command()
+
+        self.assertEqual(command[0], "/bin/bash")
+        self.assertTrue(command[1].endswith("scripts/install_sky130_pdk_ciel.sh"))
+        self.assertNotIn("pkexec", command)
+        self.assertNotIn("sudo", command)
+
+    def test_prebuilt_pdk_script_is_shipped(self) -> None:
+        self.assertTrue(SetupManager().pdk_prebuilt_install_script().is_file())
 
     def test_pdk_bundle_preflight_reports_disabled_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

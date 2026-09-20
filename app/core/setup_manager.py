@@ -10,6 +10,7 @@ import sys
 
 from app.core.dependency_manifest import DependencyManifest
 from app.core.env_validator import EnvValidator, REQUIRED_PDK_SUBDIRS
+from app.core.python_env import venv_path
 from app.core.settings_manager import AppSettings
 
 
@@ -108,6 +109,9 @@ class SetupManager:
     def pdk_bundle_install_script(self) -> Path:
         return self.repo_root / "scripts" / "install_tt_pdk_bundle.py"
 
+    def pdk_prebuilt_install_script(self) -> Path:
+        return self.repo_root / "scripts" / "install_sky130_pdk_ciel.sh"
+
     def installer_command(self) -> list[str]:
         return ["pkexec", "/bin/bash", str(self.installer_script()), self.manifest.default_channel()]
 
@@ -116,6 +120,10 @@ class SetupManager:
 
     def pdk_bundle_install_command(self) -> list[str]:
         return [sys.executable, str(self.pdk_bundle_install_script()), self.manifest.default_channel()]
+
+    def pdk_prebuilt_install_command(self) -> list[str]:
+        """Install the upstream prebuilt sky130A as the desktop user (no privileges)."""
+        return ["/bin/bash", str(self.pdk_prebuilt_install_script()), self.manifest.default_channel()]
 
     def bootstrap_packages(self, channel: str | None = None) -> tuple[str, ...]:
         return self.manifest.channel(channel).apt_packages
@@ -442,9 +450,9 @@ class SetupManager:
         return lines
 
     def detect_python_environment(self) -> dict[str, str]:
+        """Report the user Python environment paths without probing interpreters."""
         detected: dict[str, str] = {}
-        diagnosis = self.validator.diagnose(AppSettings()).python_env
-        venv_python = Path(diagnosis.python_bin)
+        venv_python = venv_path() / "bin" / "python"
         requirements = self.repo_root / "requirements.txt"
         if venv_python.exists():
             detected["venv"] = str(venv_python)

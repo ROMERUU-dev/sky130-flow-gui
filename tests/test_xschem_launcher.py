@@ -10,9 +10,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-qtcore_stub = SimpleNamespace(QSettings=object)
-sys.modules.setdefault("PySide6", SimpleNamespace(QtCore=qtcore_stub))
-sys.modules.setdefault("PySide6.QtCore", qtcore_stub)
+from tests.qt_stubs import install_qtcore_stub
+
+install_qtcore_stub()
 
 from app.core.settings_manager import AppSettings
 from app.core.xschem_launcher import XschemLaunchBuilder

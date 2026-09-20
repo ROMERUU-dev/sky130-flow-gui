@@ -33,8 +33,20 @@ class ChannelPolicy:
     pdk_bundle_asset_url: str
     pdk_bundle_asset_filename: str
     pdk_bundle_asset_sha256: str
+    pdk_bundle_disabled_reason: str
+    pdk_prebuilt_enabled: bool
+    pdk_prebuilt_provider: str
+    pdk_prebuilt_description: str
+    pdk_prebuilt_install_command: tuple[str, ...]
+    pdk_prebuilt_enable_command: tuple[str, ...]
+    pdk_prebuilt_family: str
+    pdk_prebuilt_version: str
+    pdk_prebuilt_root: str
+    pdk_prebuilt_releases_url: str
+    pdk_prebuilt_minimum_free_gb: int
     pdk_preferred_sources: tuple[str, ...]
     pdk_search_roots: tuple[str, ...]
+    tool_minimum_versions: tuple[tuple[str, str], ...]
 
 
 class DependencyManifest:
@@ -59,6 +71,8 @@ class DependencyManifest:
         raw_channel = channels[channel_name]
         bootstrap = raw_channel.get("bootstrap", {})
         pdk = raw_channel.get("pdk", {})
+        prebuilt = pdk.get("prebuilt", {})
+        minimum_versions = raw_channel.get("tool_minimum_versions", {})
         return ChannelPolicy(
             name=channel_name,
             description=str(raw_channel.get("description", "")),
@@ -82,8 +96,20 @@ class DependencyManifest:
             pdk_bundle_asset_url=str(pdk.get("bundle", {}).get("asset_url", "")),
             pdk_bundle_asset_filename=str(pdk.get("bundle", {}).get("asset_filename", "")),
             pdk_bundle_asset_sha256=str(pdk.get("bundle", {}).get("asset_sha256", "")),
+            pdk_bundle_disabled_reason=str(pdk.get("bundle", {}).get("disabled_reason", "")),
+            pdk_prebuilt_enabled=bool(prebuilt.get("enabled", False)),
+            pdk_prebuilt_provider=str(prebuilt.get("provider", "")),
+            pdk_prebuilt_description=str(prebuilt.get("description", "")),
+            pdk_prebuilt_install_command=tuple(str(item) for item in prebuilt.get("install_command", [])),
+            pdk_prebuilt_enable_command=tuple(str(item) for item in prebuilt.get("enable_command", [])),
+            pdk_prebuilt_family=str(prebuilt.get("pdk_family", "")),
+            pdk_prebuilt_version=str(prebuilt.get("version", "")),
+            pdk_prebuilt_root=str(prebuilt.get("pdk_root", "~/.ciel")),
+            pdk_prebuilt_releases_url=str(prebuilt.get("releases_url", "")),
+            pdk_prebuilt_minimum_free_gb=int(prebuilt.get("minimum_free_gb", 6)),
             pdk_preferred_sources=tuple(str(item) for item in pdk.get("preferred_sources", [])),
             pdk_search_roots=tuple(str(item) for item in pdk.get("search_roots", [])),
+            tool_minimum_versions=tuple((str(k), str(v)) for k, v in minimum_versions.items()),
         )
 
     def _load_json(self) -> dict:

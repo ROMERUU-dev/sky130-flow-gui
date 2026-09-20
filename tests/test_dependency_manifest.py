@@ -22,18 +22,38 @@ class DependencyManifestTest(unittest.TestCase):
         self.assertIn("autoconf", channel.pdk_source_build_required_commands)
         self.assertEqual(channel.pdk_managed_root, "~/pdk")
         self.assertEqual(channel.pdk_bundle_install_root, "~/pdk")
-        self.assertEqual(channel.pdk_bundle_name, "tt-pdk-sky130a")
-        self.assertTrue(channel.pdk_bundle_enabled)
-        self.assertEqual(channel.pdk_bundle_version, "0.2.0")
-        self.assertEqual(
-            channel.pdk_bundle_asset_url,
-            "https://github.com/ROMERUU-dev/sky130-flow-gui/releases/download/v0.2.0/tt-pdk-sky130a_0.2.0.tar.gz",
-        )
-        self.assertEqual(channel.pdk_bundle_asset_filename, "tt-pdk-sky130a_0.2.0.tar.gz")
-        self.assertEqual(
-            channel.pdk_bundle_asset_sha256,
-            "1b6e1a21193ea6894f2c889e95c73df89ad461a0cfb6e8e4d2eecd412565ecdf",
-        )
+
+    def test_maintainer_built_pdk_bundle_is_not_distributed(self) -> None:
+        """The shipped manifest must not point users at a hand-built PDK tarball."""
+        channel = DependencyManifest().channel()
+
+        self.assertFalse(channel.pdk_bundle_enabled)
+        self.assertEqual(channel.pdk_bundle_asset_url, "")
+        self.assertEqual(channel.pdk_bundle_asset_sha256, "")
+        self.assertIn("reproducible", channel.pdk_bundle_disabled_reason)
+
+    def test_prebuilt_pdk_route_points_at_upstream_releases(self) -> None:
+        channel = DependencyManifest().channel()
+
+        self.assertTrue(channel.pdk_prebuilt_enabled)
+        self.assertEqual(channel.pdk_prebuilt_provider, "ciel")
+        self.assertEqual(channel.pdk_prebuilt_family, "sky130")
+        self.assertIn("fossi-foundation", channel.pdk_prebuilt_releases_url)
+        self.assertIn("ciel", channel.pdk_prebuilt_install_command)
+        self.assertIn(channel.pdk_prebuilt_version, channel.pdk_prebuilt_enable_command)
+
+    def test_tool_minimum_versions_flag_stale_distro_packages(self) -> None:
+        """Ubuntu ships Magic 8.3.105, which current SKY130 techfiles reject."""
+        minimums = dict(DependencyManifest().channel().tool_minimum_versions)
+
+        self.assertEqual(minimums["magic"], "8.3.411")
+        self.assertIn("netgen", minimums)
+
+    def test_open_pdks_source_build_is_pinned_to_a_current_release(self) -> None:
+        channel = DependencyManifest().channel()
+
+        self.assertEqual(channel.pdk_source_build_open_pdks_ref, "1.0.608")
+        self.assertIn("RTimothyEdwards/open_pdks", channel.pdk_source_build_open_pdks_repo)
 
     def test_unknown_channel_raises(self) -> None:
         manifest = DependencyManifest()

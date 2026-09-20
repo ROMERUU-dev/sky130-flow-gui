@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.command_runner import CommandRunner, CommandSpec
+from app.core.env_probe import EnvProbe
 from app.core.env_validator import EnvValidator
 from app.core.i18n import pick
 from app.core.settings_manager import AppSettings
@@ -111,6 +112,7 @@ class SetupTab(QWidget):
         self.use_pdk_btn = QPushButton(pick(self.lang, "Usar PDK seleccionado", "Use selected PDK"))
         self.install_managed_pdk_btn = QPushButton(pick(self.lang, "Instalar PDK gestionado", "Install managed PDK"))
         self.install_bundle_pdk_btn = QPushButton(pick(self.lang, "Descargar bundle PDK", "Download PDK bundle"))
+        self.install_prebuilt_pdk_btn = QPushButton(pick(self.lang, "Instalar PDK oficial (ciel)", "Install official PDK (ciel)"))
         self.check_source_build_btn = QPushButton(pick(self.lang, "Precheck build desde fuentes", "Source-build precheck"))
         self.build_from_sources_btn = QPushButton(pick(self.lang, "Build PDK desde fuentes", "Build PDK from sources"))
         self.pdk_candidate_combo = QComboBox()
@@ -121,6 +123,8 @@ class SetupTab(QWidget):
         self.pdk_preflight_summary.setWordWrap(True)
         self.pdk_bundle_summary = QLabel()
         self.pdk_bundle_summary.setWordWrap(True)
+        self.pdk_prebuilt_summary = QLabel()
+        self.pdk_prebuilt_summary.setWordWrap(True)
         self.pdk_source_preflight_summary = QLabel()
         self.pdk_source_preflight_summary.setWordWrap(True)
         self.prev_btn = QPushButton(pick(self.lang, "Atrás", "Back"))
@@ -131,8 +135,11 @@ class SetupTab(QWidget):
         self._sync_step_ui()
         self._set_activity_idle()
         self._sync_action_gates()
-        self.refresh_validation()
-        self.refresh_detection()
+        self._probe = EnvProbe(self)
+        self._probe.finished.connect(self._on_probe_finished)
+        self._probe.failed.connect(self._on_probe_failed)
+        self._show_probe_placeholder()
+        self._probe.start(self.settings, self.lang)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -329,8 +336,8 @@ class SetupTab(QWidget):
             self._page_hint(
                 pick(
                     self.lang,
-                    "Este paso instala paquetes del sistema para Ubuntu y compila Magic 8.3.634 desde la fuente oficial para SKY130. No crea `.venv` ni toca el entorno Python del usuario.",
-                    "This step installs Ubuntu system packages and builds Magic 8.3.634 from the official source release for SKY130. It does not create `.venv` or touch the user-owned Python environment.",
+                    "Este paso instala paquetes del sistema para Ubuntu y compila Magic 8.3.634 desde la fuente oficial para SKY130. No crea ni toca el entorno Python XDG del usuario.",
+                    "This step installs Ubuntu system packages and builds Magic 8.3.634 from the official source release for SKY130. It does not create or modify the user-owned XDG Python environment.",
                 )
             )
         )
@@ -382,11 +389,14 @@ class SetupTab(QWidget):
         actions.addWidget(self.detect_pdk_btn)
         actions.addWidget(self.use_pdk_btn)
         actions.addWidget(self.install_managed_pdk_btn)
+        actions.addWidget(self.install_prebuilt_pdk_btn)
         actions.addWidget(self.install_bundle_pdk_btn)
         actions.addStretch(1)
         layout.addLayout(actions)
         layout.addWidget(QLabel(pick(self.lang, "Preflight de instalación gestionada", "Managed install preflight")))
         layout.addWidget(self.pdk_preflight_summary)
+        layout.addWidget(QLabel(pick(self.lang, "PDK oficial precompilado", "Official prebuilt PDK")))
+        layout.addWidget(self.pdk_prebuilt_summary)
         layout.addWidget(QLabel(pick(self.lang, "Bundle PDK", "PDK bundle")))
         layout.addWidget(self.pdk_bundle_summary)
         source_actions = QHBoxLayout()
@@ -472,14 +482,15 @@ class SetupTab(QWidget):
         return card
 
     def _wire(self) -> None:
-        self.validate_btn.clicked.connect(self.refresh_validation)
+        self.validate_btn.clicked.connect(self.rescan_environment)
         self.apply_defaults_btn.clicked.connect(self.apply_detected_defaults)
         self.install_btn.clicked.connect(self.install_environment)
-        self.refresh_detect_btn.clicked.connect(self.refresh_detection)
+        self.refresh_detect_btn.clicked.connect(self.rescan_environment)
         self.detect_pdk_btn.clicked.connect(self.refresh_pdk_candidates)
         self.use_pdk_btn.clicked.connect(self.apply_selected_pdk_candidate)
         self.install_managed_pdk_btn.clicked.connect(self.install_managed_pdk)
         self.install_bundle_pdk_btn.clicked.connect(self.install_bundle_pdk)
+        self.install_prebuilt_pdk_btn.clicked.connect(self.install_prebuilt_pdk)
         self.check_source_build_btn.clicked.connect(self.refresh_pdk_source_preflight)
         self.build_from_sources_btn.clicked.connect(self.build_pdk_from_sources)
         self.pdk_candidate_combo.currentIndexChanged.connect(self._update_pdk_candidate_summary)
@@ -542,8 +553,8 @@ class SetupTab(QWidget):
         self.summary_label.setText(
             pick(
                 self.lang,
-                f"Checks correctos: {ok_count}/{total}. Herramientas, PDK y `.venv` se validan por separado.",
-                f"Passing checks: {ok_count}/{total}. Tools, PDK, and `.venv` are validated independently.",
+                f"Checks correctos: {ok_count}/{total}. Herramientas, PDK y entorno Python XDG se validan por separado.",
+                f"Passing checks: {ok_count}/{total}. Tools, PDK, and the XDG Python environment are validated independently.",
             )
         )
         self._update_ready_state(diagnosis)
@@ -555,6 +566,31 @@ class SetupTab(QWidget):
         self.status_table.resizeColumnsToContents()
         self._sync_action_gates()
         self._finish_activity(True, pick(self.lang, "Validación lista", "Validation ready"))
+
+    def rescan_environment(self) -> None:
+        """Re-probe the machine after something changed, without blocking the UI."""
+        EnvValidator.invalidate_cache()
+        if not self._probe.start(self.settings, self.lang, refresh=True):
+            return
+        self._show_probe_placeholder()
+
+    def _show_probe_placeholder(self) -> None:
+        """Tell the user a scan is running instead of showing a frozen window."""
+        scanning = pick(self.lang, "Analizando el sistema...", "Scanning the system...")
+        self.summary_label.setText(scanning)
+        for card in (self.card_tools_value, self.card_pdk_value, self.card_python_value, self.card_overall_value):
+            card.setText("...")
+
+    def _on_probe_finished(self, _diagnosis: object) -> None:
+        """Populate the page from the warm cache the worker thread just filled."""
+        self.refresh_detection()
+        self.refresh_validation()
+
+    def _on_probe_failed(self, message: str) -> None:
+        self.summary_label.setText(
+            pick(self.lang, f"No se pudo analizar el entorno: {message}",
+                 f"The environment could not be scanned: {message}")
+        )
 
     def refresh_detection(self) -> None:
         self._begin_activity(pick(self.lang, "Refrescando detección...", "Refreshing detection..."))
@@ -611,6 +647,7 @@ class SetupTab(QWidget):
             self.pdk_candidate_combo.setCurrentIndex(0)
         self._refresh_pdk_preflight()
         self.refresh_pdk_bundle_preflight()
+        self.refresh_pdk_prebuilt_summary()
         self.refresh_pdk_source_preflight()
         self._update_pdk_candidate_summary()
         self._sync_action_gates()
@@ -625,8 +662,7 @@ class SetupTab(QWidget):
             return
         self._begin_activity(pick(self.lang, "Adoptando PDK detectado...", "Adopting detected PDK..."))
         changed = self.setup_mgr.apply_pdk_candidate(self.settings, sky130a_path)
-        self.refresh_detection()
-        self.refresh_validation()
+        self.rescan_environment()
         if changed:
             self.settings_updated.emit(self.settings)
             self.send_status.emit(pick(self.lang, "PDK detectado aplicado", "Detected PDK applied"))
@@ -657,8 +693,7 @@ class SetupTab(QWidget):
                 )
             )
             self.send_status.emit(pick(self.lang, "PDK gestionado listo", "Managed PDK ready"))
-            self.refresh_detection()
-            self.refresh_validation()
+            self.rescan_environment()
             self._route_after_pdk_ready()
             self._finish_activity(True, pick(self.lang, "PDK gestionado instalado", "Managed PDK installed"))
             return
@@ -695,6 +730,7 @@ class SetupTab(QWidget):
     def refresh_pdk_bundle_preflight(self) -> None:
         self._pdk_bundle_preflight = self.setup_mgr.pdk_bundle_preflight(self.settings)
         summary = self._pdk_bundle_preflight
+        disabled_reason = "" if summary.enabled else self.setup_mgr.manifest.channel().pdk_bundle_disabled_reason
         self.pdk_bundle_summary.setText(
             pick(
                 self.lang,
@@ -705,7 +741,8 @@ class SetupTab(QWidget):
                 f"Espacio libre: {summary.free_bytes / (1024 ** 3):.1f} GB\n"
                 f"Asset configurado: {'sí' if bool(summary.asset_url and summary.asset_filename) else 'no'}\n"
                 f"Publicado por la app: {'sí' if summary.enabled else 'no'}\n"
-                f"Listo para instalar: {'sí' if summary.ready else 'no'}",
+                f"Listo para instalar: {'sí' if summary.ready else 'no'}"
+                + (f"\nMotivo: {disabled_reason}" if disabled_reason else ""),
                 f"Bundle: {summary.bundle_name}\n"
                 f"Version: {summary.bundle_version or 'not published'}\n"
                 f"Canonical install: {summary.target_sky130a}\n"
@@ -713,10 +750,63 @@ class SetupTab(QWidget):
                 f"Free space: {summary.free_bytes / (1024 ** 3):.1f} GB\n"
                 f"Asset configured: {'yes' if bool(summary.asset_url and summary.asset_filename) else 'no'}\n"
                 f"Published by the app: {'yes' if summary.enabled else 'no'}\n"
-                f"Ready to install: {'yes' if summary.ready else 'no'}",
+                f"Ready to install: {'yes' if summary.ready else 'no'}"
+                + (f"\nReason: {disabled_reason}" if disabled_reason else ""),
             )
         )
         self._sync_action_gates()
+
+    def refresh_pdk_prebuilt_summary(self) -> None:
+        """Describe the upstream prebuilt PDK route pinned by the manifest."""
+        policy = self.setup_mgr.manifest.channel()
+        if not policy.pdk_prebuilt_enabled:
+            self.pdk_prebuilt_summary.setText(
+                pick(self.lang, "Ruta no disponible en este canal.", "Route unavailable in this channel.")
+            )
+            return
+        version = policy.pdk_prebuilt_version
+        short = version[:12] if version else pick(self.lang, "sin fijar", "unpinned")
+        self.pdk_prebuilt_summary.setText(
+            pick(
+                self.lang,
+                f"Proveedor: {policy.pdk_prebuilt_provider} (builds oficiales upstream)\n"
+                f"Familia: {policy.pdk_prebuilt_family}\n"
+                f"Build fijado: {short}\n"
+                f"PDK_ROOT: {policy.pdk_prebuilt_root}\n"
+                f"Releases: {policy.pdk_prebuilt_releases_url}\n"
+                "Se instala como usuario normal, sin sudo.",
+                f"Provider: {policy.pdk_prebuilt_provider} (official upstream builds)\n"
+                f"Family: {policy.pdk_prebuilt_family}\n"
+                f"Pinned build: {short}\n"
+                f"PDK_ROOT: {policy.pdk_prebuilt_root}\n"
+                f"Releases: {policy.pdk_prebuilt_releases_url}\n"
+                "Installs as the normal user, without sudo.",
+            )
+        )
+
+    def install_prebuilt_pdk(self) -> None:
+        """Install sky130A from the upstream prebuilt releases."""
+        script_path = self.setup_mgr.pdk_prebuilt_install_script()
+        if not script_path.is_file():
+            self.log.append(
+                pick(
+                    self.lang,
+                    f"Script del PDK oficial no encontrado: {script_path}\n",
+                    f"Official PDK script was not found: {script_path}\n",
+                )
+            )
+            return
+        self._begin_activity(pick(self.lang, "Instalando PDK oficial...", "Installing official PDK..."))
+        self.log.append(
+            pick(
+                self.lang,
+                "Descargando el sky130A precompilado desde los releases upstream. Puede tardar varios minutos.\n",
+                "Downloading the prebuilt sky130A from the upstream releases. This can take several minutes.\n",
+            )
+        )
+        self.send_status.emit(pick(self.lang, "Instalando PDK oficial", "Installing official PDK"))
+        self._runner_action = "install_pdk_prebuilt"
+        self.runner.run(CommandSpec(command=self.setup_mgr.pdk_prebuilt_install_command()))
 
     def install_bundle_pdk(self) -> None:
         self.refresh_pdk_bundle_preflight()
@@ -804,8 +894,8 @@ class SetupTab(QWidget):
         self.log.append(
             pick(
                 self.lang,
-                "Lanzando bootstrap de Ubuntu con privilegios. Este paso instala paquetes del sistema y Magic 8.3.634; `.venv` debe prepararse después como usuario normal.\n",
-                "Launching Ubuntu bootstrap with privileges. This step installs system packages and Magic 8.3.634; `.venv` must be prepared afterwards as the normal user.\n",
+                "Lanzando bootstrap de Ubuntu con privilegios. Este paso instala paquetes del sistema y Magic 8.3.634; el entorno Python XDG se prepara después como usuario normal.\n",
+                "Launching Ubuntu bootstrap with privileges. This step installs system packages and Magic 8.3.634; the XDG Python environment is prepared afterwards as the normal user.\n",
             )
         )
         self.send_status.emit(pick(self.lang, "Instalación en progreso", "Installation in progress"))
@@ -826,8 +916,7 @@ class SetupTab(QWidget):
                 )
             )
             self.send_status.emit(pick(self.lang, "Setup listo", "Setup ready"))
-            self.refresh_detection()
-            self.refresh_validation()
+            self.rescan_environment()
             self._apply_detected_defaults(automatic=True)
             self._route_after_tools_ready()
             self._finish_activity(True, pick(self.lang, "Instalación lista", "Installation ready"))
@@ -842,8 +931,7 @@ class SetupTab(QWidget):
                 )
             )
             self.send_status.emit(pick(self.lang, "Build de PDK listo", "PDK build ready"))
-            self.refresh_detection()
-            self.refresh_validation()
+            self.rescan_environment()
             self._route_after_pdk_ready()
             self._finish_activity(True, pick(self.lang, "Build de PDK listo", "PDK build ready"))
             return
@@ -857,11 +945,25 @@ class SetupTab(QWidget):
                 )
             )
             self.send_status.emit(pick(self.lang, "Bundle PDK listo", "PDK bundle ready"))
-            self.refresh_detection()
-            self.refresh_validation()
+            self.rescan_environment()
             self._apply_detected_defaults(automatic=True)
             self._route_after_pdk_ready()
             self._finish_activity(True, pick(self.lang, "Bundle PDK listo", "PDK bundle ready"))
+            return
+
+        if code == 0 and action == "install_pdk_prebuilt":
+            self.log.append(
+                pick(
+                    self.lang,
+                    "\nPDK oficial instalado. Refrescando detección y validación.\n",
+                    "\nOfficial PDK installed. Refreshing detection and validation.\n",
+                )
+            )
+            self.send_status.emit(pick(self.lang, "PDK oficial listo", "Official PDK ready"))
+            self.rescan_environment()
+            self._apply_detected_defaults(automatic=True)
+            self._route_after_pdk_ready()
+            self._finish_activity(True, pick(self.lang, "PDK oficial listo", "Official PDK ready"))
             return
 
         if action == "build_pdk_sources":
@@ -890,6 +992,20 @@ class SetupTab(QWidget):
             self._finish_activity(False, pick(self.lang, "Bundle PDK falló", "PDK bundle failed"))
             return
 
+        if action == "install_pdk_prebuilt":
+            self.log.append(
+                pick(
+                    self.lang,
+                    f"\nLa instalación del PDK oficial falló (exit={code}, status={status}). "
+                    "Revisa el log; suele faltar `pip` de usuario o `~/.local/bin` en el PATH.\n",
+                    f"\nOfficial PDK installation failed (exit={code}, status={status}). "
+                    "Check the log; a missing user `pip` or `~/.local/bin` on PATH is the usual cause.\n",
+                )
+            )
+            self.send_status.emit(pick(self.lang, "PDK oficial falló", "Official PDK failed"))
+            self._finish_activity(False, pick(self.lang, "PDK oficial falló", "Official PDK failed"))
+            return
+
         if action == "install_tools":
             self._handle_install_tools_failure(code, status)
             return
@@ -904,8 +1020,7 @@ class SetupTab(QWidget):
                 f"\nThe installer ended with a warning/error (exit={code}, status={status}). Revalidating what is installed now.\n",
             )
         )
-        self.refresh_detection()
-        self.refresh_validation()
+        self.rescan_environment()
         self._apply_detected_defaults(automatic=True)
         diagnosis = self._last_diagnosis
         if diagnosis is not None and self._tools_ready(diagnosis):
@@ -939,8 +1054,7 @@ class SetupTab(QWidget):
             else pick(self.lang, "Guardando rutas detectadas...", "Saving detected paths...")
         )
         changed = self.setup_mgr.apply_detected_defaults(self.settings)
-        self.refresh_detection()
-        self.refresh_validation()
+        self.rescan_environment()
         if changed:
             self.settings_updated.emit(self.settings)
             if automatic:
@@ -1051,10 +1165,10 @@ class SetupTab(QWidget):
                 self.lang,
                 "Puedes volver a Simulation, Extraction o LVS con confianza."
                 if overall_ready
-                else "La app no marcará el entorno como listo mientras falte el PDK, exista un `.venv` roto o falten permisos de escritura.",
+                else "La app no marcará el entorno como listo mientras falte el PDK, exista un entorno Python roto o falten permisos de escritura.",
                 "You can go back to Simulation, Extraction, or LVS with confidence."
                 if overall_ready
-                else "The app will not report the environment as ready while the PDK is missing, `.venv` is broken, or write permissions are insufficient.",
+                else "The app will not report the environment as ready while the PDK is missing, the Python environment is broken, or write permissions are insufficient.",
             )
         )
 
@@ -1148,6 +1262,7 @@ class SetupTab(QWidget):
             and self._pdk_bundle_preflight is not None
             and self._pdk_bundle_preflight.ready
         )
+        self.install_prebuilt_pdk_btn.setEnabled(self._verification_completed)
         self.check_source_build_btn.setEnabled(self._verification_completed)
         self.build_from_sources_btn.setEnabled(
             self._verification_completed

@@ -8,12 +8,15 @@ import pwd
 import re
 import shutil
 import subprocess
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import ClassVar
 
 from app.core.dependency_manifest import DependencyManifest
 from app.core.i18n import pick
+from app.core.python_env import PythonEnvironmentManager
 from app.core.settings_manager import AppSettings
 
 
@@ -30,7 +33,9 @@ TOOL_ALIASES: dict[str, tuple[str, ...]] = {
 TOOL_VERSION_ARGS: dict[str, tuple[tuple[str, ...], ...]] = {
     "xschem": (("--version",), ("-v",)),
     "ngspice": (("--version",), ("-v",)),
-    "magic": (("-dnull", "-noconsole", "-version"), ("-version",), ("--version",)),
+    # Magic 8.3.6xx prints a usage error for "-version" and still exits 0, so the
+    # long option has to be tried first or the usage text is stored as a version.
+    "magic": (("--version",), ("-dnull", "-noconsole", "--version"), ("-dnull", "-noconsole", "-version")),
     "netgen": (("-batch", "quit"),),
     "klayout": (("-v",), ("--version",)),
     "python": (("--version",),),
@@ -70,6 +75,8 @@ class ToolDiagnosis:
     version: str = ""
     status: str = "missing"
     message: str = ""
+    minimum_version: str = ""
+    outdated: bool = False
 
 
 @dataclass
@@ -97,6 +104,15 @@ class PythonEnvDiagnosis:
     python_bin: str = ""
     problems: list[str] = field(default_factory=list)
     message: str = ""
+    status: str = ""
+    system_python: str = ""
+    system_version: str = ""
+    architecture: str = ""
+    pip_available: bool = False
+    packages: dict[str, str] = field(default_factory=dict)
+    missing_packages: list[str] = field(default_factory=list)
+    import_error: str = ""
+    legacy_path: str = ""
 
 
 @dataclass
@@ -127,13 +143,48 @@ class ValidationRow:
 
 
 class EnvValidator:
-    """Validate configured executables, PDK paths, and local Python environment."""
+    """Validate configured executables, PDK paths, and local Python environment.
+
+    A full diagnosis shells out to every configured tool plus the user Python
+    environment, which costs well over half a second.  The setup assistant and
+    the preferences page each need the same answer several times while they
+    build, so results are memoized process-wide for a short window and dropped
+    whenever the app changes something the diagnosis depends on.
+    """
+
+    CACHE_TTL_SECONDS = 30.0
+    _cache: ClassVar[dict[tuple, tuple[float, EnvironmentDiagnosis]]] = {}
 
     def __init__(self) -> None:
         self.repo_root = Path(__file__).resolve().parents[2]
         self.manifest = DependencyManifest()
 
-    def diagnose(self, settings: AppSettings, lang: str = "en") -> EnvironmentDiagnosis:
+    @classmethod
+    def invalidate_cache(cls) -> None:
+        """Drop memoized diagnoses after the environment was modified."""
+        cls._cache.clear()
+
+    @staticmethod
+    def _cache_key(settings: AppSettings, lang: str, repo_root: Path) -> tuple:
+        return (
+            str(repo_root),
+            lang,
+            tuple(sorted(vars(settings.tool_paths).items())),
+            tuple(sorted(vars(settings.pdk_paths).items())),
+        )
+
+    def diagnose(self, settings: AppSettings, lang: str = "en", *, refresh: bool = False) -> EnvironmentDiagnosis:
+        """Return an environment diagnosis, reusing a recent one when possible."""
+        key = self._cache_key(settings, lang, self.repo_root)
+        if not refresh:
+            cached = self._cache.get(key)
+            if cached is not None and (time.monotonic() - cached[0]) < self.CACHE_TTL_SECONDS:
+                return cached[1]
+        diagnosis = self._diagnose_uncached(settings, lang)
+        self._cache[key] = (time.monotonic(), diagnosis)
+        return diagnosis
+
+    def _diagnose_uncached(self, settings: AppSettings, lang: str) -> EnvironmentDiagnosis:
         tools = OrderedDict(
             (name, self._detect_tool(name, getattr(settings.tool_paths, name, ""), lang))
             for name in ("xschem", "ngspice", "magic", "netgen", "klayout")
@@ -178,7 +229,7 @@ class EnvValidator:
         rows.append(
             ValidationRow(
                 key="python:venv",
-                item=pick(lang, "Python: .venv", "Python: .venv"),
+                item=pick(lang, "Entorno Python XDG", "XDG Python environment"),
                 status=self._python_status_label(diagnosis.python_env, lang),
                 ok=not diagnosis.python_env.problems and diagnosis.python_env.requirements_ok,
                 detail=diagnosis.python_env.message,
@@ -226,6 +277,8 @@ class EnvValidator:
             if found_binary != primary_alias and Path(found_binary).name != primary_alias:
                 status = "alias"
 
+            minimum = self._minimum_version(logical_name)
+            outdated = self._is_outdated(version, minimum)
             message = self._build_tool_message(
                 logical_name=logical_name,
                 found_binary=found_binary,
@@ -234,6 +287,14 @@ class EnvValidator:
                 status=status,
                 lang=lang,
             )
+            if outdated:
+                message += " " + pick(
+                    lang,
+                    f"Versión por debajo del mínimo recomendado ({minimum}); "
+                    "los paquetes de Ubuntu suelen ir muy por detrás del upstream.",
+                    f"This is below the recommended minimum ({minimum}); "
+                    "Ubuntu packages often lag far behind upstream.",
+                )
             return ToolDiagnosis(
                 logical_name=logical_name,
                 configured_value=configured_value,
@@ -242,6 +303,8 @@ class EnvValidator:
                 version=version,
                 status=status,
                 message=message,
+                minimum_version=minimum,
+                outdated=outdated,
             )
 
         return ToolDiagnosis(
@@ -311,102 +374,46 @@ class EnvValidator:
 
     def _detect_python_environment(self, lang: str) -> PythonEnvDiagnosis:
         app_root = self.repo_root
-        venv_path = app_root / ".venv"
-        requirements = app_root / "requirements.txt"
-        repo_writable = os.access(app_root, os.W_OK)
-        venv_exists = venv_path.exists()
-        problems: list[str] = []
-        venv_owner = ""
-        venv_writable = False
-        requirements_ok = False
-        python_bin = str(venv_path / "bin" / "python")
-
-        if venv_exists:
-            stat_result = venv_path.stat()
-            venv_owner = self._owner_name(stat_result.st_uid)
-            venv_writable = os.access(venv_path, os.W_OK)
-            current_uid = os.getuid()
-            if stat_result.st_uid != current_uid and current_uid != 0:
-                problems.append(
-                    pick(
-                        lang,
-                        f"El entorno virtual existe, pero pertenece a {venv_owner}. Esto puede ocurrir si se mezcló pkexec con operaciones del usuario.",
-                        f"The virtual environment exists, but it belongs to {venv_owner}. This can happen when pkexec is mixed with user-owned operations.",
-                    )
-                )
-            if not venv_writable:
-                problems.append(
-                    pick(
-                        lang,
-                        f"No se puede modificar `.venv` en {venv_path} porque el usuario actual no tiene permisos de escritura.",
-                        f"`.venv` at {venv_path} is not writable by the current user.",
-                    )
-                )
-            if Path(python_bin).exists():
-                requirements_ok = self._check_python_requirements(Path(python_bin))
-                if not requirements_ok:
-                    problems.append(
-                        pick(
-                            lang,
-                            "El entorno virtual existe, pero faltan dependencias Python (`PySide6`, `pyqtgraph`) o no se pudieron validar.",
-                            "The virtual environment exists, but Python dependencies (`PySide6`, `pyqtgraph`) are missing or could not be validated.",
-                        )
-                    )
-            else:
-                problems.append(
-                    pick(
-                        lang,
-                        "El entorno virtual existe, pero no contiene `.venv/bin/python`.",
-                        "The virtual environment exists, but `.venv/bin/python` is missing.",
-                    )
-                )
-        else:
-            if not repo_writable:
-                problems.append(
-                    pick(
-                        lang,
-                        f"No se puede preparar `.venv` en esta ruta porque el usuario actual no tiene permisos de escritura sobre {app_root}.",
-                        f"`.venv` cannot be prepared here because the current user does not have write permission in {app_root}.",
-                    )
-                )
-            else:
-                problems.append(
-                    pick(
-                        lang,
-                        f"No existe `.venv` en {venv_path}.",
-                        f"`.venv` does not exist at {venv_path}.",
-                    )
-                )
-
-        if not requirements.exists():
-            problems.append(
-                pick(
-                    lang,
-                    f"No se encontró `requirements.txt` en {requirements}.",
-                    f"`requirements.txt` was not found at {requirements}.",
-                )
-            )
-
-        if not problems and requirements_ok:
-            message = pick(
-                lang,
-                f"Entorno Python listo en {venv_path}.",
-                f"Python environment is ready at {venv_path}.",
-            )
+        detected = PythonEnvironmentManager(app_root).diagnose()
+        problems = list(detected.problems)
+        legacy_notice = ""
+        if detected.legacy_path:
+            legacy_notice = pick(lang,
+                f"Se detectó un venv legacy en {detected.legacy_path} (propietario: {detected.legacy_owner}); no se usa ni se copia. Reconstrúyelo en la ruta XDG.",
+                f"A legacy venv was found at {detected.legacy_path} (owner: {detected.legacy_owner}); it is neither used nor copied. Rebuild it at the XDG path.")
+        if detected.ready:
+            versions = ", ".join(f"{name} {version}" for name, version in detected.packages.items())
+            message = pick(lang, f"Entorno Python listo en {detected.venv_path}: {versions}.",
+                           f"Python environment ready at {detected.venv_path}: {versions}.")
+            if legacy_notice:
+                message += " " + legacy_notice
         else:
             message = " ".join(problems)
+            if legacy_notice:
+                message = (message + " " + legacy_notice).strip()
+        system_summary = f"{detected.system_python or 'python3'} {detected.system_version} [{detected.architecture}]".strip()
+        message = pick(lang, f"Python del sistema: {system_summary}. ", f"System Python: {system_summary}. ") + message
 
         return PythonEnvDiagnosis(
             app_root=str(app_root),
-            venv_path=str(venv_path),
-            venv_exists=venv_exists,
-            venv_owner=venv_owner,
-            venv_writable=venv_writable,
-            repo_writable=repo_writable,
-            requirements_ok=requirements_ok,
-            python_bin=python_bin,
+            venv_path=detected.venv_path,
+            venv_exists=detected.venv_exists,
+            venv_owner=detected.venv_owner,
+            venv_writable=detected.venv_writable,
+            repo_writable=os.access(Path(detected.venv_path).parent, os.W_OK),
+            requirements_ok=detected.ready,
+            python_bin=detected.python_bin,
             problems=problems,
             message=message,
+            status=detected.status,
+            system_python=detected.system_python,
+            system_version=detected.system_version,
+            architecture=detected.architecture,
+            pip_available=detected.pip_available,
+            packages=detected.packages,
+            missing_packages=detected.missing_packages,
+            import_error=detected.import_error,
+            legacy_path=detected.legacy_path,
         )
 
     def _detect_gui_dependencies(self, lang: str) -> GuiDependencyDiagnosis:
@@ -492,8 +499,8 @@ class EnvValidator:
             recommendations.append(
                 pick(
                     lang,
-                    "Prepara `.venv` como usuario normal. No mezcles `pkexec` o `sudo` con la creación del entorno Python dentro del repo.",
-                    "Prepare `.venv` as the normal user. Do not mix `pkexec` or `sudo` with Python environment creation inside the repo.",
+                    "Crea o repara el entorno Python XDG como usuario normal. No uses `pkexec`, `sudo` ni pip global.",
+                    "Create or repair the XDG Python environment as the normal user. Do not use `pkexec`, `sudo`, or global pip.",
                 )
             )
         if gui_dependencies.missing_required or gui_dependencies.missing_recommended:
@@ -643,6 +650,47 @@ class EnvValidator:
             return None
         return tuple(int(part) for part in match.group(1).split("."))
 
+    def _minimum_version(self, logical_name: str) -> str:
+        """Return the manifest floor for a tool, if one is declared."""
+        try:
+            minimums = dict(self.manifest.channel().tool_minimum_versions)
+        except (KeyError, OSError, ValueError):
+            return ""
+        return minimums.get(logical_name, "")
+
+    @classmethod
+    def _is_outdated(cls, version_text: str, minimum: str) -> bool:
+        """Compare a detected version against a manifest floor, conservatively."""
+        if not version_text or not minimum:
+            return False
+        detected = cls._parse_version_tuple(version_text)
+        required = cls._parse_version_tuple(minimum)
+        if detected is None or required is None:
+            return False
+        width = min(len(detected), len(required))
+        return detected[:width] < required[:width]
+
+    @staticmethod
+    def _clean_version_output(output: str) -> str:
+        """Pick the line that actually carries a version number.
+
+        Tools are inconsistent here: ngspice leads with a row of asterisks and
+        Magic answers an unknown flag with usage text on exit code 0.  Taking
+        the first line verbatim stored things like ``Unknown option: '-version'``
+        as the detected version, which also defeated the Magic/PDK compatibility
+        check downstream.
+        """
+        rejected_prefixes = ("unknown option", "usage:", "error", "invalid option")
+        for line in output.splitlines():
+            stripped = line.strip()
+            if not stripped or not stripped.strip("*= -"):
+                continue
+            if stripped.lower().startswith(rejected_prefixes):
+                return ""
+            if re.search(r"\d+\.\d+|\d{2,}", stripped):
+                return stripped[:180]
+        return ""
+
     @staticmethod
     def _query_version(logical_name: str, executable: str) -> str:
         for args in TOOL_VERSION_ARGS.get(logical_name, (("--version",),)):
@@ -656,9 +704,9 @@ class EnvValidator:
                 )
             except (OSError, subprocess.SubprocessError):
                 continue
-            output = (result.stdout or result.stderr).strip()
-            if output:
-                return output.splitlines()[0][:180]
+            version = EnvValidator._clean_version_output(f"{result.stdout}\n{result.stderr}")
+            if version:
+                return version
         return ""
 
     @staticmethod

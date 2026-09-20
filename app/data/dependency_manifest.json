@@ -3,7 +3,7 @@
   "default_channel": "stable",
   "channels": {
     "stable": {
-      "description": "Pinned operational baseline for Ubuntu/Debian setups. Prefer distro packages and existing local PDK installations over live upstream fetches.",
+      "description": "Pinned operational baseline for Ubuntu/Debian setups. Prefers distro packages and existing local PDK installations, and falls back to upstream prebuilt PDKs (ciel) or a source build of open_pdks. No maintainer-built artifacts are distributed.",
       "bootstrap": {
         "apt_packages": [
           "git",
@@ -51,20 +51,21 @@
           "tcsh"
         ],
         "source_build_open_pdks_repo": "https://github.com/RTimothyEdwards/open_pdks.git",
-        "source_build_open_pdks_ref": "1.0.321",
+        "source_build_open_pdks_ref": "1.0.608",
         "source_build_configure_args": [
           "--enable-sky130-pdk"
         ],
         "bundle": {
-          "enabled": true,
-          "name": "tt-pdk-sky130a",
-          "version": "0.2.0",
+          "enabled": false,
+          "name": "sky130a-prebuilt",
+          "version": "",
           "install_root": "~/pdk",
           "cache_root": "~/.cache/sky130-flow-gui/pdk",
           "minimum_free_gb": 10,
-          "asset_url": "https://github.com/ROMERUU-dev/sky130-flow-gui/releases/download/v0.2.0/tt-pdk-sky130a_0.2.0.tar.gz",
-          "asset_filename": "tt-pdk-sky130a_0.2.0.tar.gz",
-          "asset_sha256": "1b6e1a21193ea6894f2c889e95c73df89ad461a0cfb6e8e4d2eecd412565ecdf"
+          "asset_url": "",
+          "asset_filename": "",
+          "asset_sha256": "",
+          "disabled_reason": "Earlier releases shipped a tarball built from a maintainer workstation's ~/pdk/sky130A. That snapshot was not reproducible and carried local modifications, so it is no longer published. Use the 'prebuilt' (ciel) route for a signed upstream build, or build open_pdks from source."
         },
         "preferred_sources": [
           "settings",
@@ -80,7 +81,51 @@
           "~/tt-pdk",
           "~/tt-pdk/volare",
           "~/tt-pdk/ciel"
-        ]
+        ],
+        "prebuilt": {
+          "enabled": true,
+          "provider": "ciel",
+          "description": "Upstream prebuilt sky130A from fossi-foundation/ciel-releases, managed by the ciel CLI.",
+          "install_command": [
+            "python3",
+            "-m",
+            "pip",
+            "install",
+            "--user",
+            "--upgrade",
+            "ciel"
+          ],
+          "pdk_family": "sky130",
+          "version": "ff08c23db8359afce3f134c454e7930586d0641c",
+          "enable_command": [
+            "ciel",
+            "enable",
+            "--pdk-family",
+            "sky130",
+            "ff08c23db8359afce3f134c454e7930586d0641c"
+          ],
+          "pdk_root": "~/.ciel",
+          "releases_url": "https://github.com/fossi-foundation/ciel-releases/releases",
+          "minimum_free_gb": 6
+        }
+      },
+      "tool_minimum_versions": {
+        "magic": "8.3.411",
+        "netgen": "1.5.200",
+        "xschem": "3.4.4",
+        "ngspice": "42",
+        "klayout": "0.28"
+      },
+      "tool_source_builds": {
+        "magic": {
+          "repo": "https://github.com/RTimothyEdwards/magic.git",
+          "ref": "8.3.684",
+          "script": "scripts/install_magic_ubuntu.sh"
+        },
+        "netgen": {
+          "repo": "https://github.com/RTimothyEdwards/netgen.git",
+          "ref": "1.5.323"
+        }
       }
     },
     "latest-tested": {
@@ -132,20 +177,21 @@
           "tcsh"
         ],
         "source_build_open_pdks_repo": "https://github.com/RTimothyEdwards/open_pdks.git",
-        "source_build_open_pdks_ref": "1.0.321",
+        "source_build_open_pdks_ref": "1.0.608",
         "source_build_configure_args": [
           "--enable-sky130-pdk"
         ],
         "bundle": {
-          "enabled": true,
-          "name": "tt-pdk-sky130a",
-          "version": "0.2.0",
+          "enabled": false,
+          "name": "sky130a-prebuilt",
+          "version": "",
           "install_root": "~/pdk",
           "cache_root": "~/.cache/sky130-flow-gui/pdk",
           "minimum_free_gb": 10,
-          "asset_url": "https://github.com/ROMERUU-dev/sky130-flow-gui/releases/download/v0.2.0/tt-pdk-sky130a_0.2.0.tar.gz",
-          "asset_filename": "tt-pdk-sky130a_0.2.0.tar.gz",
-          "asset_sha256": "1b6e1a21193ea6894f2c889e95c73df89ad461a0cfb6e8e4d2eecd412565ecdf"
+          "asset_url": "",
+          "asset_filename": "",
+          "asset_sha256": "",
+          "disabled_reason": "Earlier releases shipped a tarball built from a maintainer workstation's ~/pdk/sky130A. That snapshot was not reproducible and carried local modifications, so it is no longer published. Use the 'prebuilt' (ciel) route for a signed upstream build, or build open_pdks from source."
         },
         "preferred_sources": [
           "settings",
@@ -161,7 +207,51 @@
           "~/tt-pdk",
           "~/tt-pdk/volare",
           "~/tt-pdk/ciel"
-        ]
+        ],
+        "prebuilt": {
+          "enabled": true,
+          "provider": "ciel",
+          "description": "Upstream prebuilt sky130A from fossi-foundation/ciel-releases, managed by the ciel CLI.",
+          "install_command": [
+            "python3",
+            "-m",
+            "pip",
+            "install",
+            "--user",
+            "--upgrade",
+            "ciel"
+          ],
+          "pdk_family": "sky130",
+          "version": "ff08c23db8359afce3f134c454e7930586d0641c",
+          "enable_command": [
+            "ciel",
+            "enable",
+            "--pdk-family",
+            "sky130",
+            "ff08c23db8359afce3f134c454e7930586d0641c"
+          ],
+          "pdk_root": "~/.ciel",
+          "releases_url": "https://github.com/fossi-foundation/ciel-releases/releases",
+          "minimum_free_gb": 6
+        }
+      },
+      "tool_minimum_versions": {
+        "magic": "8.3.411",
+        "netgen": "1.5.200",
+        "xschem": "3.4.4",
+        "ngspice": "42",
+        "klayout": "0.28"
+      },
+      "tool_source_builds": {
+        "magic": {
+          "repo": "https://github.com/RTimothyEdwards/magic.git",
+          "ref": "8.3.684",
+          "script": "scripts/install_magic_ubuntu.sh"
+        },
+        "netgen": {
+          "repo": "https://github.com/RTimothyEdwards/netgen.git",
+          "ref": "1.5.323"
+        }
       }
     }
   }
