@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -27,7 +28,16 @@ from PySide6.QtWidgets import (
 
 from app.core.i18n import pick
 from app.core.project_manager import ProjectManager
+from app.core.project_status import (
+    STATE_FAILED,
+    STATE_NEVER_RUN,
+    STATE_OK,
+    STATE_STALE,
+    build_status,
+    describe_stale,
+)
 from app.core.repo_readiness import RepoReadinessChecker
+from app.ui.theme import resolve
 
 
 class ProjectTab(QWidget):
@@ -35,7 +45,8 @@ class ProjectTab(QWidget):
 
     project_changed = Signal(str)
 
-    def __init__(self, manager: ProjectManager, recent_projects: list[str], language: str = "es") -> None:
+    def __init__(self, manager: ProjectManager, recent_projects: list[str], language: str = "es",
+                 theme: str = "system") -> None:
         super().__init__()
         self.manager = manager
         self.recent_projects = recent_projects
@@ -47,10 +58,18 @@ class ProjectTab(QWidget):
         self.recent = QListWidget()
         self.info = QTextEdit()
         self.info.setReadOnly(True)
+        self.status_card = QFrame()
+        self.status_card.setObjectName("sectionCard")
+        self.status_grid = QGridLayout(self.status_card)
+        self.status_grid.setContentsMargins(16, 14, 16, 14)
+        self.status_grid.setHorizontalSpacing(14)
+        self.status_grid.setVerticalSpacing(8)
+        self._theme = resolve(theme)
 
         self._build_ui()
         self._load_recent()
         self._refresh_context_label()
+        self.refresh_status()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -85,6 +104,8 @@ class ProjectTab(QWidget):
 
         layout.addLayout(row)
         layout.addWidget(self.current_label)
+        layout.addWidget(QLabel(pick(self.lang, "Estado del flujo", "Flow status")))
+        layout.addWidget(self.status_card)
         layout.addWidget(QLabel(pick(self.lang, "Archivos detectados del flujo", "Detected Flow Files")))
         layout.addWidget(self.files)
         layout.addWidget(QLabel(pick(self.lang, "Proyectos recientes", "Recent Projects")))
@@ -626,6 +647,53 @@ class ProjectTab(QWidget):
             self.recent_projects[:] = self.recent_projects[:15]
             self._load_recent()
         self.project_changed.emit(path)
+
+    def refresh_status(self) -> None:
+        """Show where each stage of the flow stands, in one place."""
+        while self.status_grid.count():
+            item = self.status_grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        spanish = not self.lang.lower().startswith("en")
+        outputs = self.manager.outputs()
+        status = build_status(outputs.runs, project=str(outputs.base))
+
+        if not status.has_any_run:
+            empty = QLabel(
+                pick(self.lang,
+                     "Todavía no se ha corrido nada en este proyecto.",
+                     "Nothing has been run in this project yet.")
+            )
+            empty.setObjectName("inlineHint")
+            self.status_grid.addWidget(empty, 0, 0, 1, 3)
+            return
+
+        marks = {
+            STATE_OK: ("OK", self._theme.success),
+            STATE_FAILED: ("FALLÓ" if spanish else "FAILED", self._theme.danger),
+            STATE_STALE: ("DESACTUALIZADO" if spanish else "STALE", self._theme.warning),
+            STATE_NEVER_RUN: ("—", self._theme.text_muted),
+        }
+        for row, stage in enumerate(status.stages):
+            label, colour = marks[stage.state]
+
+            badge = QLabel(label)
+            badge.setStyleSheet(f"color: {colour}; font-weight: 800;")
+            name = QLabel(stage.title(spanish))
+            name.setStyleSheet(f"color: {self._theme.text}; font-weight: 700;")
+
+            detail_text = describe_stale(stage.stale_after, spanish) if stage.stale_after else stage.detail
+            parts = [stage.describe_age(spanish), detail_text]
+            detail = QLabel(" · ".join(part for part in parts if part))
+            detail.setObjectName("inlineHint")
+            detail.setWordWrap(True)
+
+            self.status_grid.addWidget(badge, row, 0)
+            self.status_grid.addWidget(name, row, 1)
+            self.status_grid.addWidget(detail, row, 2)
+        self.status_grid.setColumnStretch(2, 1)
 
     def _refresh_context_label(self) -> None:
         outputs = self.manager.outputs()

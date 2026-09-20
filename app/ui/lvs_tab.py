@@ -20,14 +20,19 @@ from PySide6.QtWidgets import (
 
 from app.core.command_runner import CommandRunner
 from app.core.i18n import pick
+from app.core.run_history import KIND_LVS
+from app.ui.run_recording import RunRecordingMixin
 from app.core.log_parser import LogParser
 from app.core.settings_manager import AppSettings
 from app.runners.lvs_runner import LvsRunner
 from app.ui.widgets import MAX_LOG_BLOCKS, append_log
 
 
-class LvsTab(QWidget):
+class LvsTab(RunRecordingMixin, QWidget):
     """Run netgen LVS and summarize result."""
+
+    RUN_KIND = KIND_LVS
+    ADVISOR_TOOL = "netgen"
 
     send_status = Signal(str)
 
@@ -149,16 +154,27 @@ class LvsTab(QWidget):
             f"{pick(self.lang, 'Reporte', 'Report')}: {report}\n",
         )
         self.summary.clear()
+        self._last_report_path = report
+        self._begin_run_record(
+            outputs,
+            label=Path(self.layout_edit.text().strip() or "lvs").name,
+            inputs={"layout": self.layout_edit.text().strip(),
+                    "schematic": self.schematic_edit.text().strip()},
+        )
         self.send_status.emit(pick(self.lang, "LVS corriendo", "LVS running"))
         self._set_lvs_running(True)
         self.runner.run(self.builder.build(cmd, cwd=str(outputs.base)))
 
     def _finished(self, code: int, _status: str) -> None:
         self._set_lvs_running(False)
-        text = self.log.toPlainText()
+        report_path = getattr(self, "_last_report_path", "")
+        # Netgen writes its verdict to the report, not to stdout.
+        text = f"{self.log.toPlainText()}\n{self._read_report(report_path)}"
         summary = LogParser.lvs_summary(text)
         if code != 0:
             summary = pick(self.lang, "LVS falló", "LVS failed")
+        advices = self._end_run_record(code, {"report": str(report_path or "")}, summary, text)
+        self._report_advice(advices, self.log)
         self.summary.setText(summary)
         self.send_status.emit(summary)
 

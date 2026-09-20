@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
 
 from app.core.command_runner import CommandRunner
 from app.core.i18n import pick
+from app.core.run_history import KIND_EXTRACTION
+from app.ui.run_recording import RunRecordingMixin
 from app.core.layout_tools import infer_top_cell, resolve_layout_dir
 from app.core.magic_launcher import MagicLaunchBuilder
 from app.core.settings_manager import AppSettings
@@ -28,8 +30,11 @@ from app.runners.magic_runner import MagicRunner
 from app.ui.widgets import MAX_LOG_BLOCKS, append_log
 
 
-class ExtractionTab(QWidget):
+class ExtractionTab(RunRecordingMixin, QWidget):
     """Run magic-based extraction in batch mode."""
+
+    RUN_KIND = KIND_EXTRACTION
+    ADVISOR_TOOL = "magic"
 
     send_status = Signal(str)
     netlist_ready = Signal(str)
@@ -128,12 +133,26 @@ class ExtractionTab(QWidget):
             f"{pick(self.lang, 'Netlist', 'Netlist')}: {self._out_netlist}\n",
         )
 
+        self._begin_run_record(
+            outputs,
+            label=top,
+            inputs={"layout_dir": str(layout_dir), "top_cell": top},
+        )
         self.send_status.emit(pick(self.lang, "Extracción corriendo", "Extraction running"))
         self.runner.run(self.builder.build(cmd, cwd=str(layout_dir)))
 
     def _finished(self, code: int, _status: str) -> None:
         extracted_path = Path(self._out_netlist) if self._out_netlist else None
-        if code == 0 and extracted_path and extracted_path.exists() and extracted_path.is_file():
+        produced = bool(code == 0 and extracted_path and extracted_path.is_file())
+        advices = self._end_run_record(
+            code if code else (0 if produced else 1),
+            {"netlist": str(self._out_netlist or "")},
+            pick(self.lang, "Netlist extraído", "Netlist extracted") if produced
+            else pick(self.lang, "Sin netlist", "No netlist"),
+            self.log.toPlainText(),
+        )
+        self._report_advice(advices, self.log)
+        if produced:
             self.send_status.emit(pick(self.lang, "Extracción finalizada", "Extraction finished"))
             append_log(
                 self.log,

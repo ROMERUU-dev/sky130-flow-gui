@@ -2,6 +2,26 @@
 
 ## 0.4.0 — 2026-09-20
 
+### The project tells you where it stands
+
+The Project page opens with a summary of the whole flow, because that
+information existed but was spread across five tabs:
+
+```
+OK              Extracción   hace 10 min · Netlist extraído
+DESACTUALIZADO  Simulación   hace 15 min · Extracción corrió después
+DESACTUALIZADO  LVS          hace 1 h    · Extracción, Simulación corrieron después
+FALLÓ           Antena       hace 2 min  · Antenna violations found
+```
+
+A stage that passed is marked stale when an upstream stage has run since: an
+LVS pass from an hour ago means nothing if the layout was re-extracted ten
+minutes ago, and nothing in the app used to say so.
+
+Extraction, LVS and antenna runs are recorded in the history alongside
+simulation, and all four read their tool's own report rather than judging the
+run by captured stdout alone.
+
 ### Runs can be compared against each other
 
 `Comparar con...` next to the previous-runs list overlays a recorded run on the

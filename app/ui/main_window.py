@@ -137,7 +137,12 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _build_tabs(self) -> None:
-        self.project_tab = ProjectTab(self.project_mgr, self.app_settings.recent_projects, self.app_settings.language)
+        self.project_tab = ProjectTab(
+            self.project_mgr,
+            self.app_settings.recent_projects,
+            self.app_settings.language,
+            self.app_settings.theme,
+        )
         self.project_tab.project_changed.connect(self._on_project_changed)
 
         self.sim_tab = SimulationTab(self.app_settings, self.project_mgr.outputs)
@@ -153,6 +158,10 @@ class MainWindow(QMainWindow):
 
         for tab in [self.sim_tab, self.lvs_tab, self.ext_tab, self.ant_tab, self.em_tab, self.pref_tab]:
             tab.send_status.connect(self.set_status)
+        # The flow-status panel reads the run history, so it has to be
+        # rebuilt whenever a tool finishes in another tab.
+        for tab in [self.sim_tab, self.lvs_tab, self.ext_tab, self.ant_tab]:
+            tab.runner.finished.connect(lambda *_args: self.project_tab.refresh_status())
 
         self.tabs.addTab(self.sim_tab, pick(self.app_settings.language, "Simulación", "Simulation"))
         self.tabs.addTab(self.lvs_tab, "LVS")

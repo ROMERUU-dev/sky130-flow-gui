@@ -22,14 +22,19 @@ from PySide6.QtWidgets import (
 from app.core.command_runner import CommandRunner
 from app.core.antenna_tools import detect_antenna_support
 from app.core.i18n import pick
+from app.core.run_history import KIND_ANTENNA
+from app.ui.run_recording import RunRecordingMixin
 from app.core.log_parser import LogParser
 from app.core.settings_manager import AppSettings
 from app.runners.antenna_runner import AntennaRunner
 from app.ui.widgets import MAX_LOG_BLOCKS, append_log
 
 
-class AntennaTab(QWidget):
+class AntennaTab(RunRecordingMixin, QWidget):
     """Run KLayout antenna checks in batch mode."""
+
+    RUN_KIND = KIND_ANTENNA
+    ADVISOR_TOOL = "magic"
 
     send_status = Signal(str)
 
@@ -198,6 +203,11 @@ class AntennaTab(QWidget):
             f"{pick(self.lang, 'Reporte', 'Report')}: {report}\n",
         )
 
+        self._begin_run_record(
+            outputs,
+            label=Path(layout).name or "antenna",
+            inputs={"layout": layout, "engine": self.current_engine()},
+        )
         self.send_status.emit(pick(self.lang, "Chequeo de antena corriendo", "Antenna check running"))
         self.runner.run(self.builder.build(cmd, cwd=str(outputs.base)))
 
@@ -219,6 +229,10 @@ class AntennaTab(QWidget):
         summary = LogParser.antenna_summary(text)
         if code != 0:
             summary = pick(self.lang, "Chequeo de antena falló", "Antenna check failed")
+        advices = self._end_run_record(
+            code, {"report": str(self._last_report_path or "")}, summary, text
+        )
+        self._report_advice(advices, self.log)
         self.summary.setText(summary)
         self.send_status.emit(summary)
 
