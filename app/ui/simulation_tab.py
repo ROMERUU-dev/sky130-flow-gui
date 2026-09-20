@@ -10,6 +10,7 @@ from pathlib import Path
 import pyqtgraph as pg
 import pyqtgraph.exporters
 from PySide6.QtCore import QSignalBlocker
+from PySide6.QtCore import QTimer
 from PySide6.QtCore import Qt
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QDesktopServices
@@ -51,6 +52,7 @@ from app.core.error_advisor import analyze, format_advice, has_blocking_errors
 from app.core.output_manager import OutputPaths
 from app.core.run_compare import compare_runs
 from app.core.run_history import KIND_SIMULATION, RunHistory
+from app.core.run_progress import RawProgress, estimate_points
 from app.core.settings_manager import AppSettings
 from app.core.spice_tools import (
     apply_model_corner,
@@ -140,8 +142,9 @@ class SimulationTab(QWidget):
         self.open_out_btn = QPushButton(pick(self.lang, "Abrir carpeta de salida", "Open Output Folder"))
         self.loading_bar = QProgressBar()
         self.loading_bar.setRange(0, 0)
-        self.loading_bar.setTextVisible(False)
-        self.loading_bar.setFixedWidth(150)
+        self.loading_bar.setTextVisible(True)
+        self.loading_bar.setFormat("%p%")
+        self.loading_bar.setFixedWidth(170)
         self.loading_bar.setVisible(False)
         self.loading_bar.setToolTip(pick(self.lang, "Simulación en progreso", "Simulation in progress"))
         self.add_probe_btn = QPushButton(pick(self.lang, "Agregar probe", "Add Probe Point"))
@@ -307,6 +310,10 @@ class SimulationTab(QWidget):
         self._last_advices = []
         self._run_output: list[str] = []
         self._collecting_run_output = False
+        self._progress = None
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setInterval(500)
+        self._progress_timer.timeout.connect(self._poll_progress)
         self._spectrum_base_x_range: tuple[float, float] | None = None
         self._spectrum_base_y_range: tuple[float, float] | None = None
         self._current_spectrum_signal_name = ""
@@ -931,6 +938,7 @@ class SimulationTab(QWidget):
         self._last_command = cmd
         self._last_raw_path = Path(raw_path)
         self._last_log_path = Path(log_path)
+        self._begin_progress(generated_netlist, raw_path)
         self._run_output = []
         self._collecting_run_output = True
         self._last_advices = []
@@ -1154,6 +1162,42 @@ class SimulationTab(QWidget):
         except Exception as exc:
             self._append_log(f"Failed to load selected history: {exc}\n")
             self.send_status.emit("Failed to load previous simulation")
+
+    def _begin_progress(self, netlist_path, raw_path: str) -> None:
+        """Measure the run against the number of points the analysis implies.
+
+        ngspice only prints a percentage when attached to a terminal, so in
+        batch mode the growth of the raw file is the only signal available.
+        """
+        try:
+            netlist_text = Path(netlist_path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            netlist_text = ""
+        expected = estimate_points(netlist_text)
+        self._progress = RawProgress(raw_path, expected)
+        if self._progress.measurable:
+            self.loading_bar.setRange(0, 100)
+            self.loading_bar.setValue(0)
+            self.loading_bar.setFormat("%p%")
+        else:
+            # An .op or an unparsed directive leaves nothing to measure.
+            self.loading_bar.setRange(0, 0)
+            self.loading_bar.setFormat("")
+        self._progress_timer.start()
+
+    def _poll_progress(self) -> None:
+        if self._progress is None:
+            return
+        fraction = self._progress.fraction()
+        if fraction is None:
+            return
+        self.loading_bar.setValue(int(round(fraction * 100)))
+
+    def _end_progress(self) -> None:
+        self._progress_timer.stop()
+        self._progress = None
+        self.loading_bar.setRange(0, 0)
+        self.loading_bar.setFormat("")
 
     def _read_tool_log(self) -> str:
         """Read the log ngspice was told to write, which holds its errors."""
@@ -2285,6 +2329,8 @@ class SimulationTab(QWidget):
         self.rerun_btn.setDisabled(running)
         self.stop_btn.setEnabled(running)
         self.loading_bar.setVisible(running)
+        if not running:
+            self._end_progress()
         if running:
             self.summary_status_value.setText(pick(self.lang, "Corriendo", "Running"))
 
