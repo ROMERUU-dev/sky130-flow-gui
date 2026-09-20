@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.2 — 2026-09-20
+
+### Fixed
+
+- **The Docker installer refused to run when launched from the app.** It
+  resolved the account to grant Docker access to from `SUDO_USER`, falling back
+  to `USER`. `pkexec` — which is how the app launches it — sets neither: it
+  leaves `SUDO_USER` unset and resets `USER` to root. The installer therefore
+  resolved the target as root and refused. `PKEXEC_UID` is checked first now,
+  with `SUDO_USER`, an explicit `SKY130_TARGET_USER` override and `logname`
+  behind it.
+
+  Introduced in 0.3.1 and caught before anyone downloaded it, but 0.3.1 shipped
+  with it, so the containerized digital flow is unusable in that release.
+
 ## 0.3.1 — 2026-09-20
 
 ### Added
