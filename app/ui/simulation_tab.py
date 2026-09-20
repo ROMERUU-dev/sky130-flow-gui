@@ -45,6 +45,7 @@ from app.core.command_runner import CommandRunner
 from app.core.i18n import pick
 from app.core.log_parser import LogParser
 from app.core.ngspice_raw_parser import NgspiceRawParser
+from app.core.error_advisor import analyze, format_advice, has_blocking_errors
 from app.core.output_manager import OutputPaths
 from app.core.run_history import KIND_SIMULATION, RunHistory
 from app.core.settings_manager import AppSettings
@@ -294,6 +295,9 @@ class SimulationTab(QWidget):
         self._internal_net_candidates: list[dict] = []
         self._active_run = None
         self._last_log_path = None
+        self._last_advices = []
+        self._run_output: list[str] = []
+        self._collecting_run_output = False
         self._spectrum_base_x_range: tuple[float, float] | None = None
         self._spectrum_base_y_range: tuple[float, float] | None = None
         self._current_spectrum_signal_name = ""
@@ -916,6 +920,9 @@ class SimulationTab(QWidget):
         self._last_command = cmd
         self._last_raw_path = Path(raw_path)
         self._last_log_path = Path(log_path)
+        self._run_output = []
+        self._collecting_run_output = True
+        self._last_advices = []
         self.wave.set_signals({})
         self._clear_measurements()
         self._clear_spectrum_plot()
@@ -993,8 +1000,17 @@ class SimulationTab(QWidget):
             f"\nSimulation finished: exit={code} status={status}\n",
         )
         self._append_log(summary)
-        full_text = self.log.toPlainText()
-        failed = LogParser.has_errors(full_text) or code != 0
+        # ngspice writes its diagnostics to the file named by `-o`, not to
+        # stdout, so judging a run by the captured output alone marked failed
+        # simulations as successful.
+        self._collecting_run_output = False
+        tool_log = self._read_tool_log()
+        full_text = "".join(self._run_output) + "\n" + tool_log
+        advices = analyze(full_text, tool="ngspice")
+        self._last_advices = advices
+        if advices:
+            self._append_log("\n" + format_advice(advices))
+        failed = code != 0 or has_blocking_errors(advices) or LogParser.has_errors(tool_log)
         if failed:
             self._pending_em_run = None
             self._record_run_finished(code if code else 1)
@@ -1029,6 +1045,16 @@ class SimulationTab(QWidget):
             self._append_log(f"Failed to load selected history: {exc}\n")
             self.send_status.emit("Failed to load previous simulation")
 
+    def _read_tool_log(self) -> str:
+        """Read the log ngspice was told to write, which holds its errors."""
+        path = getattr(self, "_last_log_path", None)
+        if not path:
+            return ""
+        try:
+            return Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+
     def _record_run_finished(self, exit_code: int) -> None:
         """Close the history entry for the run that just ended."""
         if self._active_run is None:
@@ -1038,12 +1064,16 @@ class SimulationTab(QWidget):
             "raw": str(self._last_raw_path) if self._last_raw_path else "",
             "log": str(getattr(self, "_last_log_path", "") or ""),
         }
-        signal_count = len(self.wave.signal_names())
-        summary = pick(
-            self.lang,
-            f"{signal_count} señales" if signal_count else "",
-            f"{signal_count} signals" if signal_count else "",
-        )
+        advices = getattr(self, "_last_advices", []) or []
+        if advices:
+            summary = "; ".join(advice.title for advice in advices[:2])
+        else:
+            signal_count = len(self.wave.signal_names())
+            summary = pick(
+                self.lang,
+                f"{signal_count} señales" if signal_count else "",
+                f"{signal_count} signals" if signal_count else "",
+            )
         try:
             RunHistory(outputs.runs).finish(self._active_run.run_id, exit_code, artifacts, summary)
         except OSError as exc:
@@ -2131,6 +2161,11 @@ class SimulationTab(QWidget):
             self.log_viewer.clear()
 
     def _append_log(self, text: str) -> None:
+        # The advisor must never read its own rendered output back: analysing
+        # the whole log view made a clean run inherit the previous run's
+        # diagnosis. Only what the tool emitted during this run is collected.
+        if getattr(self, "_collecting_run_output", False):
+            self._run_output.append(text)
         append_log(self.log, text)
         if self.log_viewer is not None:
             append_log(self.log_viewer, text)

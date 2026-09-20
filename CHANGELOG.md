@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.4.0 — 2026-09-20
+
+### Failed simulations were reported as successful
+
+ngspice writes its diagnostics to the log file named by `-o`, not to stdout.
+The app only captured stdout and stderr, and judged a run by grepping that for
+the words "error" and "fatal". So a simulation that died on an unknown
+subcircuit — with ngspice exiting non-zero and printing `Error: unknown subckt`
+to its log — was recorded as a success, and the run history said OK about a run
+that produced nothing.
+
+The app now reads the tool's own log, and a rule set turns known failures into a
+cause and a remedy rather than a wall of output:
+
+```
+✖ Subcircuito no definido
+   El netlist instancia un subcircuito que ngspice nunca vio definido.
+   (sky130_fd_pr__nfet_01v8)
+   → Suele faltar la librería del PDK. Revisa que el netlist incluya
+     `.lib $SKY130A/libs.tech/ngspice/sky130.lib.spice tt`.
+```
+
+Rules cover ngspice (unknown subcircuit, missing include, missing model,
+singular matrix, non-convergence, incomplete instances, missing vectors), Magic
+(techfile version and path), Netgen (mismatch, empty netlist), the digital flow
+(Yosys, OpenROAD, LibreLane) and conditions that apply to any tool (permission
+denied, disk full, crashes). A run is marked failed when a blocking rule
+matches, whatever the exit code says, and the diagnosis is stored in the history
+so it cannot claim success afterwards.
+
 ## 0.3.2 — 2026-09-20
 
 ### Fixed
