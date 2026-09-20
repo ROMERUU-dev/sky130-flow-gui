@@ -29,6 +29,9 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.i18n import pick
+from app.core.notifier import Notifier, describe_outcome, should_notify
+from app.core.project_status import FLOW_TITLES
+from app.core.run_history import KIND_ANTENNA, KIND_EXTRACTION, KIND_LVS, KIND_SIMULATION, RunHistory
 from app.core.layout_tools import resolve_layout_dir
 from app.core.magic_launcher import MagicLaunchBuilder
 from app.core.output_manager import OutputManager
@@ -58,6 +61,7 @@ class MainWindow(QMainWindow):
         self.settings_mgr = SettingsManager()
         self.app_settings: AppSettings = self.settings_mgr.load()
         self.output_manager = OutputManager()
+        self._notifier = Notifier()
         self.project_mgr = ProjectManager(self.output_manager)
         self._current_project = self.app_settings.last_project
         self._startup_project_prompt_shown = False
@@ -113,6 +117,33 @@ class MainWindow(QMainWindow):
         if self.app_settings.prompt_project_on_start:
             QTimer.singleShot(250, self._prompt_for_project_on_start)
 
+    def _announce_run_finished(self, kind: str, exit_code: int) -> None:
+        """Notify the desktop when a run ends and the window is not in front.
+
+        A notification for a two-second run is noise, and one for a run you are
+        already watching is worse, so both are skipped.
+        """
+        outputs = self.project_mgr.outputs()
+        record = RunHistory(outputs.runs).last(kind=kind)
+        if record is None:
+            return
+        duration = record.duration_seconds
+        if not should_notify(
+            duration,
+            self.isActiveWindow(),
+            self.app_settings.notify_on_finish,
+            self.app_settings.notify_min_seconds,
+        ):
+            return
+
+        spanish = not self.app_settings.language.lower().startswith("en")
+        stage = FLOW_TITLES.get(kind, (kind, kind))[0 if spanish else 1]
+        detail = record.summary or record.label
+        if duration:
+            detail = f"{detail} · {record.describe_duration()}".strip(" ·")
+        title, body, urgency = describe_outcome(stage, record.succeeded and exit_code == 0, detail, spanish)
+        self._notifier.notify(title, body, urgency)
+
     def _install_shortcuts(self) -> None:
         """Ctrl+1..7 jump straight to a section; Ctrl+B collapses the menu."""
         for index in range(self.tabs.count()):
@@ -160,8 +191,17 @@ class MainWindow(QMainWindow):
             tab.send_status.connect(self.set_status)
         # The flow-status panel reads the run history, so it has to be
         # rebuilt whenever a tool finishes in another tab.
-        for tab in [self.sim_tab, self.lvs_tab, self.ext_tab, self.ant_tab]:
+        stage_tabs = (
+            (self.sim_tab, KIND_SIMULATION),
+            (self.lvs_tab, KIND_LVS),
+            (self.ext_tab, KIND_EXTRACTION),
+            (self.ant_tab, KIND_ANTENNA),
+        )
+        for tab, kind in stage_tabs:
             tab.runner.finished.connect(lambda *_args: self.project_tab.refresh_status())
+            tab.runner.finished.connect(
+                lambda code, _status, stage=kind: self._announce_run_finished(stage, code)
+            )
 
         self.tabs.addTab(self.sim_tab, pick(self.app_settings.language, "Simulación", "Simulation"))
         self.tabs.addTab(self.lvs_tab, "LVS")

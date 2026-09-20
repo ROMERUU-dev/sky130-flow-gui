@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSpinBox,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -73,6 +74,22 @@ class PreferencesTab(QWidget):
             pick(self.lang, "Preguntar por proyecto al iniciar", "Ask for a project on startup")
         )
         self.prompt_project_check.setChecked(self.settings.prompt_project_on_start)
+
+        self.notify_check = QCheckBox(
+            pick(self.lang, "Avisar cuando termine una corrida larga",
+                 "Notify when a long run finishes")
+        )
+        self.notify_check.setChecked(self.settings.notify_on_finish)
+        self.notify_check.setToolTip(
+            pick(self.lang,
+                 "Sólo avisa si la ventana no está al frente y la corrida pasó del umbral.",
+                 "Only notifies when the window is not in front and the run exceeded the threshold.")
+        )
+        self.notify_seconds = QSpinBox()
+        self.notify_seconds.setRange(0, 3600)
+        self.notify_seconds.setSingleStep(5)
+        self.notify_seconds.setSuffix(pick(self.lang, " s", " s"))
+        self.notify_seconds.setValue(self.settings.notify_min_seconds)
         self.status_table = QTableWidget(0, 3)
         self.status_table.setHorizontalHeaderLabels(
             [
@@ -168,6 +185,8 @@ class PreferencesTab(QWidget):
         form.addRow(pick(self.lang, "Idioma", "Language"), self.language_combo)
         form.addRow(pick(self.lang, "Tema", "Theme"), self.theme_combo)
         form.addRow("", self.prompt_project_check)
+        form.addRow("", self.notify_check)
+        form.addRow(pick(self.lang, "Avisar a partir de", "Notify from"), self.notify_seconds)
         form.addRow(QLabel(pick(self.lang, "Reinicia la app para aplicar el cambio de idioma.", "Restart the app to apply the language change.")))
 
         for key, value in tools.items():
@@ -248,6 +267,8 @@ class PreferencesTab(QWidget):
         self.settings.language = str(self.language_combo.currentData() or "es")
         self.settings.theme = str(self.theme_combo.currentData() or THEME_SYSTEM)
         self.settings.prompt_project_on_start = self.prompt_project_check.isChecked()
+        self.settings.notify_on_finish = self.notify_check.isChecked()
+        self.settings.notify_min_seconds = int(self.notify_seconds.value())
         self.refresh_validation()
         self.settings_updated.emit(self.settings)
 

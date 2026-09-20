@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.0 — 2026-09-20
+
+### The desktop tells you when a run finishes
+
+A corner sweep or a long extraction meant watching a window for minutes. When a
+run ends, the desktop gets a notification carrying the stage, the outcome, the
+summary and how long it took — a failure arriving at critical urgency so it
+survives do-not-disturb.
+
+It stays quiet in the two cases where a notification would be noise: when the
+window is already in front, because you are watching the run, and when the run
+finished faster than a configurable threshold, 20 s by default. Both are
+adjustable from Preferences, and notifications can be turned off entirely.
+
+Delivery goes over the freedesktop D-Bus interface the shell actually listens
+to, with `notify-send` as a fallback; a session offering neither is not an
+error, it simply stays silent.
+
 ## 0.4.0 — 2026-09-20
 
 ### The project tells you where it stands

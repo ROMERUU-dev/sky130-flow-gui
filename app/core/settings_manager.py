@@ -37,6 +37,8 @@ class AppSettings:
     theme: str = "system"
     prompt_project_on_start: bool = True
     sidebar_collapsed: bool = False
+    notify_on_finish: bool = True
+    notify_min_seconds: int = 20
     window_geometry: str = ""
 
 
@@ -74,6 +76,8 @@ class SettingsManager:
             theme=self._settings.value("ui/theme", "system", type=str),
             prompt_project_on_start=self._settings.value("ui/prompt_project_on_start", True, type=bool),
             sidebar_collapsed=self._settings.value("ui/sidebar_collapsed", False, type=bool),
+            notify_on_finish=self._settings.value("ui/notify_on_finish", True, type=bool),
+            notify_min_seconds=self._settings.value("ui/notify_min_seconds", 20, type=int),
             window_geometry=self._settings.value("ui/window_geometry", "", type=str),
         )
 
@@ -97,6 +101,8 @@ class SettingsManager:
         self._settings.setValue("ui/theme", app_settings.theme)
         self._settings.setValue("ui/prompt_project_on_start", app_settings.prompt_project_on_start)
         self._settings.setValue("ui/sidebar_collapsed", app_settings.sidebar_collapsed)
+        self._settings.setValue("ui/notify_on_finish", app_settings.notify_on_finish)
+        self._settings.setValue("ui/notify_min_seconds", app_settings.notify_min_seconds)
         self._settings.setValue("ui/window_geometry", app_settings.window_geometry)
         self._settings.sync()
 
