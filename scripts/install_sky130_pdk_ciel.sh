@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Install sky130A from the upstream prebuilt PDK releases.
 #
-# This replaces the hand-built tarball earlier versions of this project
-# published.  Builds come from fossi-foundation/ciel-releases and are keyed by
-# the open_pdks commit they were produced from, so an install is reproducible
-# and carries no local modifications.
+# Builds come from fossi-foundation/ciel-releases and are keyed by the
+# open_pdks commit they were produced from, so an install is reproducible and
+# carries no local modifications.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,8 +11,20 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MANIFEST_PATH="${MANIFEST_PATH:-$REPO_ROOT/app/data/dependency_manifest.json}"
 CHANNEL="${1:-stable}"
 
+# Ubuntu marks its system Python as externally managed (PEP 668), so
+# `pip install --user` is refused outright. The manager gets its own
+# virtualenv under the user's XDG data directory instead.
+TOOLS_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/sky130-flow-gui/tools"
+CIEL_VENV="$TOOLS_HOME/ciel"
+CIEL="$CIEL_VENV/bin/ciel"
+
 if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 is required to read the dependency manifest." >&2
+  exit 1
+fi
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "Refusing to install a user PDK as root. Run this as your desktop user." >&2
   exit 1
 fi
 
@@ -43,30 +54,34 @@ fi
 PDK_ROOT="${PDK_ROOT:-${DEFAULT_ROOT/#\~/$HOME}}"
 
 echo "== SKY130 prebuilt PDK install =="
-echo "Family:   $PDK_FAMILY"
-echo "Version:  $PDK_VERSION"
-echo "PDK_ROOT: $PDK_ROOT"
+echo "Family:    $PDK_FAMILY"
+echo "Version:   $PDK_VERSION"
+echo "PDK_ROOT:  $PDK_ROOT"
+echo "Manager:   $CIEL_VENV"
 echo
 
-if [ "$(id -u)" -eq 0 ]; then
-  echo "Refusing to install a user PDK as root. Run this as your desktop user." >&2
-  exit 1
-fi
-
-echo "Installing the ciel PDK manager for the current user..."
-python3 -m pip install --user --upgrade --no-cache-dir ciel
-
-CIEL="$(command -v ciel || true)"
-if [ -z "$CIEL" ]; then
-  CIEL="$HOME/.local/bin/ciel"
-fi
 if [ ! -x "$CIEL" ]; then
-  echo "ciel was installed but is not on PATH. Add ~/.local/bin to PATH and re-run." >&2
+  echo "Creating the PDK manager environment..."
+  mkdir -p "$TOOLS_HOME"
+  if ! python3 -m venv "$CIEL_VENV"; then
+    echo "Could not create a virtual environment. Install the Ubuntu package python3-venv." >&2
+    exit 1
+  fi
+fi
+
+echo "Installing the ciel PDK manager..."
+"$CIEL_VENV/bin/python" -m pip install --quiet --upgrade pip
+"$CIEL_VENV/bin/python" -m pip install --quiet --upgrade ciel
+
+if [ ! -x "$CIEL" ]; then
+  echo "ciel was installed but $CIEL is missing." >&2
   exit 1
 fi
 
+echo "Manager version: $("$CIEL" --version 2>&1 | head -1)"
 echo
 echo "Enabling $PDK_FAMILY build $PDK_VERSION..."
+mkdir -p "$PDK_ROOT"
 PDK_ROOT="$PDK_ROOT" "$CIEL" enable --pdk-family "$PDK_FAMILY" "$PDK_VERSION"
 
 echo

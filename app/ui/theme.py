@@ -222,6 +222,16 @@ def build_stylesheet(theme: Theme) -> str:
         background: {theme.accent_soft};
         border: 1px solid {theme.accent_border};
     }}
+    QToolButton#sidebarToggle {{
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        padding: 6px;
+    }}
+    QToolButton#sidebarToggle:hover {{
+        background: {theme.surface_alt};
+        border: 1px solid {theme.border};
+    }}
     QListWidget#sidebarNav::item:hover {{
         background: {theme.surface_alt};
         border: 1px solid {theme.border};
@@ -442,6 +452,24 @@ def page_stylesheet(theme: Theme) -> str:
     /* The scroll viewport and the stacked page keep the default palette
        colour unless they are told otherwise, which left a pale frame around
        every page in dark mode. */
+    /* One accented button per page, so the main action is obvious. */
+    QPushButton#primaryAction {{
+        background: {theme.accent};
+        color: {theme.window};
+        border: 1px solid {theme.accent};
+        font-weight: 800;
+        padding: 9px 18px;
+    }}
+    QPushButton#primaryAction:hover {{
+        background: {theme.accent_border};
+        border: 1px solid {theme.accent};
+        color: {theme.text};
+    }}
+    QPushButton#primaryAction:disabled {{
+        background: {theme.disabled_surface};
+        color: {theme.disabled_text};
+        border: 1px solid {theme.border};
+    }}
     QStackedWidget {{ background: {theme.window}; }}
     QScrollArea > QWidget > QWidget {{ background: transparent; }}
     QScrollArea {{ background: {theme.window}; }}

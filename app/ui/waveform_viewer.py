@@ -18,8 +18,10 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPushButton,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -28,6 +30,7 @@ import pyqtgraph.exporters
 
 from app.core.i18n import pick
 from app.core.waveform_export import write_csv
+from app.ui.flow_layout import FlowLayout
 from app.ui.theme import THEME_SYSTEM, Theme, resolve
 
 
@@ -52,17 +55,28 @@ class WaveformViewer(QWidget):
         self.reset_scale_btn = QPushButton(pick(self.lang, "Reset escala", "Reset Scale"))
         self.overlay_btn = QPushButton(pick(self.lang, "Superponer", "Overlay"))
         self.clear_overlay_btn = QPushButton(pick(self.lang, "Limpiar overlay", "Clear Overlay"))
-        self.export_png_btn = QPushButton("Export PNG")
-        self.export_svg_btn = QPushButton("Export SVG")
-        self.export_csv_btn = QPushButton("Export CSV")
+        # Three separate export buttons made the control row 1174px wide, which
+        # forced a horizontal scrollbar on a 1536px-wide desktop. One menu
+        # button holds the same actions in a third of the space.
+        self.export_btn = QToolButton()
+        self.export_btn.setText(pick(self.lang, "Exportar", "Export"))
+        self.export_btn.setPopupMode(QToolButton.InstantPopup)
+        export_menu = QMenu(self.export_btn)
+        self.export_png_action = export_menu.addAction("PNG")
+        self.export_svg_action = export_menu.addAction("SVG")
+        self.export_csv_action = export_menu.addAction("CSV")
+        self.export_btn.setMenu(export_menu)
         self.signal_stats = QLabel(pick(self.lang, "Sin datos", "No data"))
 
         layout = QVBoxLayout(self)
-        controls = QHBoxLayout()
+        # A flow layout wraps onto a second line instead of forcing the whole
+        # page wider than the window.
+        controls = FlowLayout(spacing=8)
         signal_label = QLabel(pick(self.lang, "Señal", "Signal"))
         signal_label.setObjectName("viewerLabel")
         controls.addWidget(signal_label)
-        controls.addWidget(self.signal_select, 1)
+        self.signal_select.setMinimumWidth(180)
+        controls.addWidget(self.signal_select)
         x_label = QLabel(pick(self.lang, "Escala X", "X scale"))
         x_label.setObjectName("viewerLabel")
         controls.addWidget(x_label)
@@ -75,9 +89,7 @@ class WaveformViewer(QWidget):
         controls.addWidget(self.reset_scale_btn)
         controls.addWidget(self.overlay_btn)
         controls.addWidget(self.clear_overlay_btn)
-        controls.addWidget(self.export_png_btn)
-        controls.addWidget(self.export_svg_btn)
-        controls.addWidget(self.export_csv_btn)
+        controls.addWidget(self.export_btn)
         layout.addLayout(controls)
         layout.addWidget(self.empty_label)
         layout.addWidget(self.plot)
@@ -111,9 +123,9 @@ class WaveformViewer(QWidget):
         self.reset_scale_btn.clicked.connect(self._reset_scale)
         self.overlay_btn.clicked.connect(self._choose_overlay_signals)
         self.clear_overlay_btn.clicked.connect(self._clear_overlay_signals)
-        self.export_png_btn.clicked.connect(lambda: self._export_plot("png"))
-        self.export_svg_btn.clicked.connect(lambda: self._export_plot("svg"))
-        self.export_csv_btn.clicked.connect(self._export_csv)
+        self.export_png_action.triggered.connect(lambda: self._export_plot("png"))
+        self.export_svg_action.triggered.connect(lambda: self._export_plot("svg"))
+        self.export_csv_action.triggered.connect(self._export_csv)
         self.signal_select.currentTextChanged.connect(self.signal_changed.emit)
 
     def set_signals(self, signals: dict[str, tuple[list[float], list[float]]]) -> None:

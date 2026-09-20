@@ -36,6 +36,7 @@ class AppSettings:
     language: str = "es"
     theme: str = "system"
     prompt_project_on_start: bool = True
+    sidebar_collapsed: bool = False
     window_geometry: str = ""
 
 
@@ -72,6 +73,7 @@ class SettingsManager:
             language=self._settings.value("ui/language", "es", type=str),
             theme=self._settings.value("ui/theme", "system", type=str),
             prompt_project_on_start=self._settings.value("ui/prompt_project_on_start", True, type=bool),
+            sidebar_collapsed=self._settings.value("ui/sidebar_collapsed", False, type=bool),
             window_geometry=self._settings.value("ui/window_geometry", "", type=str),
         )
 
@@ -94,6 +96,7 @@ class SettingsManager:
         self._settings.setValue("ui/language", app_settings.language)
         self._settings.setValue("ui/theme", app_settings.theme)
         self._settings.setValue("ui/prompt_project_on_start", app_settings.prompt_project_on_start)
+        self._settings.setValue("ui/sidebar_collapsed", app_settings.sidebar_collapsed)
         self._settings.setValue("ui/window_geometry", app_settings.window_geometry)
         self._settings.sync()
 

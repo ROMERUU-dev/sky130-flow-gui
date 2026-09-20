@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.command_runner import CommandRunner, CommandSpec
+from app.core.background import BackgroundTask
 from app.core.env_probe import EnvProbe
 from app.core.env_validator import EnvValidator
 from app.core.i18n import pick
@@ -49,6 +50,9 @@ class PreferencesTab(QWidget):
         self._theme = resolve(settings.theme)
         self.validator = EnvValidator()
         self.update_mgr = UpdateManager()
+        self._update_task = BackgroundTask(self)
+        self._update_task.finished.connect(self._on_update_checked)
+        self._update_task.failed.connect(self._on_update_check_failed)
         self.integration_mgr = IntegrationManager()
         self.cmd_runner = CommandRunner()
 
@@ -244,12 +248,55 @@ class PreferencesTab(QWidget):
         self.cmd_runner.run(CommandSpec(command=command, cwd=str(self.validator.repo_root)))
 
     def check_updates(self) -> None:
-        cmds = self.update_mgr.commands()
-        self._pending_status_check = True
-        self._last_action = "check"
-        self.cmd_runner.run(self._spec(cmds.fetch))
+        """Check for a newer release, or ask git when running from a clone."""
+        if self.update_mgr.is_git_checkout():
+            self._pending_status_check = True
+            self._last_action = "check"
+            self.cmd_runner.run(self._spec(self.update_mgr.commands().fetch))
+            return
+
+        if not self._update_task.start(self.update_mgr.check):
+            return
+        self.ops_log.append(
+            pick(self.lang, "Consultando releases en GitHub...\n", "Checking GitHub releases...\n")
+        )
+
+    def _on_update_checked(self, result: object) -> None:
+        self.ops_log.append(f"\n{result.message}\n")
+        if result.update_available:
+            self.ops_log.append(
+                pick(self.lang, f"Descarga: {result.release_url}\n", f"Download: {result.release_url}\n")
+            )
+            if result.download_url:
+                self.ops_log.append(f"  {result.download_url}\n")
+            self.ops_log.append(
+                pick(
+                    self.lang,
+                    "Instálala con: sudo apt install ./<archivo>.deb\n",
+                    "Install it with: sudo apt install ./<file>.deb\n",
+                )
+            )
+        self.send_status.emit(result.message)
+
+    def _on_update_check_failed(self, message: str) -> None:
+        self.ops_log.append(
+            pick(self.lang, f"\nNo se pudo buscar actualizaciones: {message}\n",
+                 f"\nUpdate check failed: {message}\n")
+        )
 
     def apply_updates(self) -> None:
+        """Pull from git, which only makes sense for a source checkout."""
+        if not self.update_mgr.is_git_checkout():
+            self.ops_log.append(
+                pick(
+                    self.lang,
+                    "\nEsta es una instalación empaquetada, no un clon de git, así que no puede "
+                    "actualizarse sola. Usa `Buscar actualizaciones` y descarga el .deb publicado.\n",
+                    "\nThis is a packaged install rather than a git clone, so it cannot update "
+                    "itself. Use `Check for updates` and download the published .deb.\n",
+                )
+            )
+            return
         self._pending_status_check = False
         self._last_action = "pull"
         self.cmd_runner.run(self._spec(self.update_mgr.commands().pull))

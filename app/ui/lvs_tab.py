@@ -52,6 +52,7 @@ class LvsTab(QWidget):
         self.log.document().setMaximumBlockCount(MAX_LOG_BLOCKS)
         self.log.setReadOnly(True)
         self.run_btn = QPushButton(pick(self.lang, "Correr", "Run"))
+        self.run_btn.setObjectName("primaryAction")
         self.stop_btn = QPushButton(pick(self.lang, "Detener", "Stop"))
         self.stop_btn.setEnabled(False)
         self.clear_btn = QPushButton(pick(self.lang, "Limpiar log", "Clear log"))

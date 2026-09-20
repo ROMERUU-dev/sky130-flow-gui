@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.3.1 — 2026-09-20
+
+### Fixed
+
+- **The official PDK install never ran.** The installer called
+  `pip install --user ciel`, which Ubuntu 26.04 refuses outright because its
+  system Python is marked externally managed (PEP 668). The manager now gets
+  its own virtualenv under `~/.local/share/sky130-flow-gui/tools/ciel`. This
+  path was verified by running it, not just by reading it.
+- **The update check could never succeed on a packaged install.** It ran
+  `git fetch` against the application directory, and a `.deb` install is not a
+  git checkout, so it always answered "not a git repository". Packaged installs
+  now query the GitHub releases API and compare against the shipped VERSION;
+  source checkouts keep the git path.
+- **The waveform viewer still forced a horizontal scrollbar.** Thirteen
+  controls in a non-wrapping row demanded 1174 px, more than a 1536 px desktop
+  has after the navigation column — and 0.3.0 made it worse by adding an
+  "Export CSV" button to that row. The three export buttons are now one
+  `Exportar` menu and the row wraps, taking the viewer's minimum width from
+  1174 px to 215 px. Verified at 1534×890 with traces loaded, not empty.
+
+### Interface
+
+- **Collapsible navigation.** A toggle above the menu, or `Ctrl+B`, shrinks it
+  from 208 px to 60 px icon-only. The state is remembered.
+- **Drawn icons.** The navigation used bare Unicode glyphs whose coverage
+  varies by font, so some rendered as a dash or a box. They are painted now and
+  follow the theme colour.
+- **Disabled buttons say why.** On a machine that already has a PDK, three of
+  the six actions in that step are disabled with no explanation, which reads as
+  the assistant being broken rather than as nothing needing to be done. Each
+  now carries the actual reason.
+- **One accented action per page.** `Correr` on Simulation, LVS, Extraction and
+  Antenna, and the recommended PDK route, are visually primary.
+
 ## 0.3.0 — 2026-09-19
 
 Target platform: Ubuntu 26.04 LTS (Python 3.14, Qt 6.11, GCC 15).

@@ -71,6 +71,7 @@ class AntennaTab(QWidget):
 
         btns = QHBoxLayout()
         run = QPushButton(pick(self.lang, "Correr", "Run"))
+        run.setObjectName("primaryAction")
         stop = QPushButton(pick(self.lang, "Detener", "Stop"))
         clear = QPushButton(pick(self.lang, "Limpiar log", "Clear log"))
         btns.addWidget(run)

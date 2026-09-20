@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, Qt, QTimer
+from PySide6.QtCore import QByteArray, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -42,6 +42,7 @@ from app.ui.lvs_tab import LvsTab
 from app.ui.preferences_tab import PreferencesTab
 from app.ui.project_tab import ProjectTab
 from app.ui.simulation_tab import SimulationTab
+from app.ui.icons import ICON_SIZE, make_icon, make_menu_icon
 from app.ui.theme import LIGHT, build_palette, build_stylesheet, heading_style, resolve
 
 
@@ -80,6 +81,13 @@ class MainWindow(QMainWindow):
         self.sidebar_layout = QVBoxLayout(self.sidebar_card)
         self.sidebar_layout.setContentsMargins(8, 8, 8, 8)
         self.sidebar_layout.setSpacing(8)
+
+        self.sidebar_toggle = QToolButton()
+        self.sidebar_toggle.setObjectName("sidebarToggle")
+        self.sidebar_toggle.setCheckable(True)
+        self.sidebar_toggle.setAutoRaise(True)
+        self.sidebar_toggle.clicked.connect(self.toggle_sidebar)
+        self.sidebar_layout.addWidget(self.sidebar_toggle, 0, Qt.AlignLeft)
         self.sidebar_layout.addWidget(self.sidebar)
         # The navigation holds seven short labels. Letting it claim ~280px
         # pushed the working area below the width the tab content needs and
@@ -106,10 +114,12 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(250, self._prompt_for_project_on_start)
 
     def _install_shortcuts(self) -> None:
-        """Ctrl+1..7 jump straight to a section."""
+        """Ctrl+1..7 jump straight to a section; Ctrl+B collapses the menu."""
         for index in range(self.tabs.count()):
             shortcut = QShortcut(QKeySequence(f"Ctrl+{index + 1}"), self)
             shortcut.activated.connect(lambda idx=index: self.tabs.setCurrentIndex(idx))
+        collapse = QShortcut(QKeySequence("Ctrl+B"), self)
+        collapse.activated.connect(self.toggle_sidebar)
 
     def _restore_geometry(self) -> None:
         saved = self.app_settings.window_geometry
@@ -144,13 +154,13 @@ class MainWindow(QMainWindow):
         for tab in [self.sim_tab, self.lvs_tab, self.ext_tab, self.ant_tab, self.em_tab, self.pref_tab]:
             tab.send_status.connect(self.set_status)
 
-        self.tabs.addTab(self.sim_tab, pick(self.app_settings.language, "∿ Simulación", "∿ Simulation"))
-        self.tabs.addTab(self.lvs_tab, "≣ LVS")
-        self.tabs.addTab(self.ext_tab, pick(self.app_settings.language, "◫ Extracción", "◫ Extraction"))
-        self.tabs.addTab(self.ant_tab, pick(self.app_settings.language, "⌁ Antena", "⌁ Antenna"))
-        self.tabs.addTab(self.em_tab, "≈ EM")
-        self.tabs.addTab(self.project_tab, pick(self.app_settings.language, "⌂ Proyecto", "⌂ Project"))
-        self.tabs.addTab(self.pref_tab, pick(self.app_settings.language, "⚙ Preferencias", "⚙ Preferences"))
+        self.tabs.addTab(self.sim_tab, pick(self.app_settings.language, "Simulación", "Simulation"))
+        self.tabs.addTab(self.lvs_tab, "LVS")
+        self.tabs.addTab(self.ext_tab, pick(self.app_settings.language, "Extracción", "Extraction"))
+        self.tabs.addTab(self.ant_tab, pick(self.app_settings.language, "Antena", "Antenna"))
+        self.tabs.addTab(self.em_tab, "EM")
+        self.tabs.addTab(self.project_tab, pick(self.app_settings.language, "Proyecto", "Project"))
+        self.tabs.addTab(self.pref_tab, pick(self.app_settings.language, "Preferencias", "Preferences"))
         self._populate_sidebar()
 
         if self._current_project:
@@ -172,14 +182,14 @@ class MainWindow(QMainWindow):
 
         xschem_button = QToolButton(self)
         xschem_button.setObjectName("toolbarXschemButton")
-        xschem_button.setText(pick(self.app_settings.language, "◫ xschem", "◫ xschem"))
+        xschem_button.setText("xschem")
         xschem_button.setToolTip(pick(self.app_settings.language, "Abrir xschem", "Open xschem"))
         xschem_button.clicked.connect(self._open_xschem)
         toolbar.addWidget(xschem_button)
 
         magic_button = QToolButton(self)
         magic_button.setObjectName("toolbarMagicButton")
-        magic_button.setText(pick(self.app_settings.language, "⬢ Magic", "⬢ Magic"))
+        magic_button.setText("Magic")
         magic_button.setToolTip(pick(self.app_settings.language, "Abrir Magic", "Open Magic"))
         magic_button.clicked.connect(self._open_magic)
         toolbar.addWidget(magic_button)
@@ -204,6 +214,9 @@ class MainWindow(QMainWindow):
         "light": ("#2563eb", "#e76f51", "#0f9d8a", "#d97706", "#7c3aed", "#059669", "#db2777"),
         "dark": ("#7fa9ff", "#ff9f80", "#4fd1bd", "#fbbf24", "#b696ff", "#34d399", "#f472b6"),
     }
+    SIDEBAR_ICON_NAMES = ("simulation", "lvs", "extraction", "antenna", "em", "project", "preferences")
+    SIDEBAR_EXPANDED_WIDTH = 208
+    SIDEBAR_COLLAPSED_WIDTH = 60
 
     def _populate_sidebar(self) -> None:
         self.sidebar.clear()
@@ -215,12 +228,48 @@ class MainWindow(QMainWindow):
             self.sidebar.setCurrentRow(self.tabs.currentIndex())
 
     def _repaint_sidebar_accents(self) -> None:
-        """Tint each navigation entry with a theme-appropriate accent."""
-        accents = self.SIDEBAR_ACCENTS[getattr(self, "_theme", LIGHT).mode]
+        """Tint each navigation entry and its icon with a theme accent."""
+        theme = getattr(self, "_theme", LIGHT)
+        accents = self.SIDEBAR_ACCENTS[theme.mode]
         for index in range(self.sidebar.count()):
             item = self.sidebar.item(index)
-            if item is not None:
-                item.setForeground(QColor(accents[index % len(accents)]))
+            if item is None:
+                continue
+            color = accents[index % len(accents)]
+            item.setForeground(QColor(color))
+            if index < len(self.SIDEBAR_ICON_NAMES):
+                item.setIcon(make_icon(self.SIDEBAR_ICON_NAMES[index], color))
+        self.sidebar.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+        self.sidebar_toggle.setIcon(make_menu_icon(theme.text_muted))
+        self._apply_sidebar_collapse()
+
+    def toggle_sidebar(self) -> None:
+        """Collapse the navigation to icons, or expand it again."""
+        self.app_settings.sidebar_collapsed = not self.app_settings.sidebar_collapsed
+        self._apply_sidebar_collapse()
+        self.settings_mgr.save(self.app_settings)
+
+    def _apply_sidebar_collapse(self) -> None:
+        collapsed = self.app_settings.sidebar_collapsed
+        self.sidebar_toggle.setChecked(collapsed)
+        self.sidebar_toggle.setToolTip(
+            pick(self.app_settings.language,
+                 "Expandir menú (Ctrl+B)" if collapsed else "Colapsar menú (Ctrl+B)",
+                 "Expand menu (Ctrl+B)" if collapsed else "Collapse menu (Ctrl+B)")
+        )
+        width = self.SIDEBAR_COLLAPSED_WIDTH if collapsed else self.SIDEBAR_EXPANDED_WIDTH
+        self.sidebar_card.setMinimumWidth(width)
+        self.sidebar_card.setMaximumWidth(width)
+        for index in range(self.sidebar.count()):
+            item = self.sidebar.item(index)
+            if item is None:
+                continue
+            label = self.tabs.tabText(index)
+            # The label still has to exist for the tooltip, so it is blanked
+            # rather than removed when the column is collapsed.
+            item.setText("" if collapsed else label)
+            item.setToolTip(label)
+            item.setTextAlignment(Qt.AlignCenter if collapsed else (Qt.AlignLeft | Qt.AlignVCenter))
 
     def _wire_navigation(self) -> None:
         self.sidebar.currentRowChanged.connect(self.tabs.setCurrentIndex)

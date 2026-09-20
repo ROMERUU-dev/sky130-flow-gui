@@ -79,6 +79,7 @@ class ExtractionTab(QWidget):
 
         btns = QHBoxLayout()
         run = QPushButton(pick(self.lang, "Correr", "Run"))
+        run.setObjectName("primaryAction")
         stop = QPushButton(pick(self.lang, "Detener", "Stop"))
         open_selected_mag = QPushButton(pick(self.lang, "Abrir .mag actual", "Open current .mag"))
         send = QPushButton(pick(self.lang, "Enviar resultado a Simulación", "Send result to Simulation"))

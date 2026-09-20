@@ -121,15 +121,7 @@ class SimulationTab(QWidget):
         self.refresh_history_btn = QPushButton(pick(self.lang, "Refrescar historial", "Refresh History"))
 
         self.run_btn = QPushButton(pick(self.lang, "Correr", "Run"))
-        self.run_btn.setStyleSheet(
-            """
-            QPushButton:disabled {
-                background-color: #9aa0a6;
-                color: #f3f4f6;
-                border: 1px solid #7d848c;
-            }
-            """
-        )
+        self.run_btn.setObjectName("primaryAction")
         self.stop_btn = QPushButton(pick(self.lang, "Detener", "Stop"))
         self.stop_btn.setEnabled(False)
         self.rerun_btn = QPushButton(pick(self.lang, "Repetir", "Re-run"))

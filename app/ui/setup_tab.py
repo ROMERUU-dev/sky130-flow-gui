@@ -116,7 +116,15 @@ class SetupTab(QWidget):
         self.use_pdk_btn = QPushButton(pick(self.lang, "Usar PDK seleccionado", "Use selected PDK"))
         self.install_managed_pdk_btn = QPushButton(pick(self.lang, "Instalar PDK gestionado", "Install managed PDK"))
         self.install_bundle_pdk_btn = QPushButton(pick(self.lang, "Descargar bundle PDK", "Download PDK bundle"))
-        self.install_prebuilt_pdk_btn = QPushButton(pick(self.lang, "Instalar PDK oficial (ciel)", "Install official PDK (ciel)"))
+        self.install_prebuilt_pdk_btn = QPushButton(
+            pick(self.lang, "Instalar PDK oficial  ·  recomendado", "Install official PDK  ·  recommended")
+        )
+        self.install_prebuilt_pdk_btn.setObjectName("primaryAction")
+        self.install_prebuilt_pdk_btn.setToolTip(
+            pick(self.lang,
+                 "Descarga el sky130A precompilado oficial. No necesita sudo.",
+                 "Downloads the official prebuilt sky130A. No sudo required.")
+        )
         self.check_source_build_btn = QPushButton(pick(self.lang, "Precheck build desde fuentes", "Source-build precheck"))
         self.build_from_sources_btn = QPushButton(pick(self.lang, "Build PDK desde fuentes", "Build PDK from sources"))
         self.pdk_candidate_combo = QComboBox()
@@ -1178,6 +1186,73 @@ class SetupTab(QWidget):
             return
         self._sync_action_gates()
 
+    def _explain_disabled_actions(self) -> None:
+        """Say why a greyed-out button is greyed out.
+
+        Three of the six PDK actions are normally disabled on a machine that
+        already has a PDK. With no explanation that reads as the assistant
+        being broken rather than as nothing needing to be done.
+        """
+        pending = pick(self.lang, "Primero revisa el sistema.", "Review the system first.")
+
+        def explain(button, reason: str) -> None:
+            if button.isEnabled():
+                button.setToolTip("")
+                return
+            button.setToolTip(pending if not self._verification_completed else reason)
+
+        existing = getattr(self._pdk_preflight, "existing_status", "")
+        explain(
+            self.install_managed_pdk_btn,
+            pick(
+                self.lang,
+                f"Ya hay un PDK en {getattr(self._pdk_preflight, 'target_sky130a', '~/pdk/sky130A')}, "
+                "así que no hay nada que instalar aquí."
+                if existing == "present"
+                else "Selecciona antes un candidato con `Buscar PDK reutilizable`.",
+                f"A PDK already exists at {getattr(self._pdk_preflight, 'target_sky130a', '~/pdk/sky130A')}, "
+                "so there is nothing to install here."
+                if existing == "present"
+                else "Pick a candidate first with `Find reusable PDK`.",
+            ),
+        )
+        explain(
+            self.install_bundle_pdk_btn,
+            pick(
+                self.lang,
+                "El bundle descargable está deshabilitado desde 0.3.0. "
+                "Usa `Instalar PDK oficial (ciel)`.",
+                "The downloadable bundle has been disabled since 0.3.0. "
+                "Use `Install official PDK (ciel)` instead.",
+            ),
+        )
+        explain(
+            self.build_from_sources_btn,
+            pick(
+                self.lang,
+                "Corre antes `Precheck build desde fuentes`; el build necesita "
+                "compiladores y ~20 GB libres.",
+                "Run `Source-build precheck` first; the build needs compilers "
+                "and about 20 GB of free space.",
+            ),
+        )
+        explain(
+            self.use_pdk_btn,
+            pick(
+                self.lang,
+                "No hay candidatos todavía. Usa `Buscar PDK reutilizable`.",
+                "No candidates yet. Use `Find reusable PDK`.",
+            ),
+        )
+        explain(
+            self.apply_defaults_btn,
+            pick(
+                self.lang,
+                "No se detectaron rutas nuevas que aplicar.",
+                "No newly detected paths to apply.",
+            ),
+        )
+
     def _sync_action_gates(self) -> None:
         if self._active_operations > 0:
             return
@@ -1292,6 +1367,7 @@ class SetupTab(QWidget):
             )
         )
         self._sync_step_ui()
+        self._explain_disabled_actions()
 
     def _update_pdk_candidate_summary(self) -> None:
         sky130a_path = str(self.pdk_candidate_combo.currentData() or "").strip()
