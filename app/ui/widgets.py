@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
 from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QHeaderView,
     QFileDialog,
     QLineEdit,
     QMessageBox,
@@ -125,3 +127,45 @@ def make_log_view(placeholder: str = "") -> QTextEdit:
     if placeholder:
         view.setPlaceholderText(placeholder)
     return view
+
+
+def configure_table(
+    table,
+    stretch_column: int | None = None,
+    visible_rows: int | None = None,
+    min_column_width: int = 70,
+) -> None:
+    """Size a table so its headers and rows are never cut off.
+
+    Left to itself a QTableWidget keeps its default column width, so a header
+    like "Mover al lado driver" was sliced mid-word, and a fixed pixel height
+    left the first row cut in half. Columns are sized to their contents
+    including the header, one column absorbs the slack, and the height is a
+    whole number of rows.
+    """
+    header = table.horizontalHeader()
+    header.setMinimumSectionSize(min_column_width)
+    header.setTextElideMode(Qt.ElideRight)
+    for column in range(table.columnCount()):
+        mode = QHeaderView.Stretch if column == stretch_column else QHeaderView.ResizeToContents
+        header.setSectionResizeMode(column, mode)
+    if stretch_column is None:
+        header.setStretchLastSection(True)
+    table.setWordWrap(False)
+    table.setSelectionBehavior(QAbstractItemView.SelectRows)
+    table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked)
+
+    if visible_rows:
+        # Row and header heights are only final once the table has been laid
+        # out; measuring now leaves the last row sliced in half.
+        QTimer.singleShot(0, lambda: table.setMinimumHeight(table_height_for_rows(table, visible_rows)))
+
+
+def table_height_for_rows(table, rows: int) -> int:
+    """Height that shows exactly `rows` whole rows plus the header."""
+    row_height = table.verticalHeader().defaultSectionSize()
+    if table.rowCount():
+        row_height = max(row_height, table.rowHeight(0), table.sizeHintForRow(0))
+    header = table.horizontalHeader()
+    header_height = max(header.height(), header.sizeHint().height())
+    return header_height + rows * row_height + 2 * table.frameWidth() + 2

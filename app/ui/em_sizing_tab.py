@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.i18n import pick
+from app.ui.widgets import configure_table
 from app.core.settings_manager import AppSettings
 from app.models.em_models import AnalysisBundle
 from app.services.em_service import EmService
@@ -147,6 +148,7 @@ class EmSizingTab(QWidget):
                 pick(self.lang, "Estado", "Status"),
             ]
         )
+        configure_table(self.results_table, visible_rows=6)
 
         self.detail_text.setReadOnly(True)
         self.warning_text.setReadOnly(True)

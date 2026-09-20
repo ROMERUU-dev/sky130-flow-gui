@@ -67,7 +67,7 @@ from app.services.em_netlist_instrumentation import (
 )
 from app.ui.theme import resolve
 from app.ui.waveform_viewer import WaveformViewer
-from app.ui.widgets import MAX_LOG_BLOCKS, CollapsibleSection, append_log
+from app.ui.widgets import configure_table, MAX_LOG_BLOCKS, CollapsibleSection, append_log
 
 
 class SimulationTab(QWidget):
@@ -636,7 +636,6 @@ class SimulationTab(QWidget):
 
     def _configure_tiny_tapeout_pin_table(self) -> None:
         self.tt_analog_table.verticalHeader().hide()
-        self.tt_analog_table.setMinimumHeight(220)
         self.tt_analog_table.setAlternatingRowColors(True)
         role_items = [
             (pick(self.lang, "Hi-Z / no conectar", "Hi-Z / no source"), "hiz"),
@@ -671,7 +670,9 @@ class SimulationTab(QWidget):
             self.tt_analog_table.setCellWidget(row, 3, load_combo)
             role_combo.currentIndexChanged.connect(self._save_project_simulation_profile)
             load_combo.currentIndexChanged.connect(self._save_project_simulation_profile)
-        self.tt_analog_table.resizeColumnsToContents()
+        # `Valor / offset` is the widest header, and the combo cells need room
+        # for their longest entry; sizing to contents covers both.
+        configure_table(self.tt_analog_table, stretch_column=2, visible_rows=8)
         self.tt_analog_table.itemChanged.connect(self._save_project_simulation_profile)
 
     def _build_probe_editor(self) -> QWidget:
@@ -718,6 +719,8 @@ class SimulationTab(QWidget):
                 pick(self.lang, "Mover al lado driver", "Move to driver side"),
             ]
         )
+        # The line preview is the long one, so it absorbs the spare width.
+        configure_table(self.internal_connections_table, stretch_column=2, visible_rows=6)
         outer.addWidget(self.internal_connections_table)
 
         buttons = QHBoxLayout()

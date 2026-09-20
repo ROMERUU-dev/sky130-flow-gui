@@ -42,6 +42,12 @@
   antenna deck, so that Preferences field is legitimately blank — but a blank
   field with only a label still reads as something missing. It now carries a
   placeholder saying the PDK has no deck and that the Antenna page uses Magic.
+- **Tables no longer cut off their own headers or rows.** Columns kept their
+  default width, so headers were sliced mid-word (`Mover al lado driver` became
+  `er al lado dr`), and a fixed pixel height left the first row halved. Columns
+  are now sized to their contents including the header, one column absorbs the
+  slack, and the height is measured after layout so it is a whole number of
+  rows. Applied to all five tables in the app.
 - **A warmer dark theme.** The dark palette was blue-tinted, which fought the
   accent colours the pages use for status. It is now warm neutral grey with a
   terracotta accent.

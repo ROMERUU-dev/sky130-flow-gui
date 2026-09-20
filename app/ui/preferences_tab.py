@@ -35,7 +35,7 @@ from app.core.settings_manager import AppSettings
 from app.core.update_manager import UpdateManager
 from app.ui.setup_tab import SetupTab
 from app.ui.theme import THEME_DARK, THEME_LIGHT, THEME_SYSTEM, hint_style, resolve
-from app.ui.widgets import MAX_LOG_BLOCKS, browse_dir, browse_file
+from app.ui.widgets import configure_table, MAX_LOG_BLOCKS, browse_dir, browse_file
 
 
 class PreferencesTab(QWidget):
@@ -81,6 +81,7 @@ class PreferencesTab(QWidget):
                 pick(self.lang, "Detalle", "Detail"),
             ]
         )
+        configure_table(self.status_table, stretch_column=2, visible_rows=8)
         self.ops_log = QTextEdit()
         self.ops_log.document().setMaximumBlockCount(MAX_LOG_BLOCKS)
         self.ops_log.setReadOnly(True)

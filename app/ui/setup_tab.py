@@ -27,7 +27,7 @@ from app.core.command_runner import CommandRunner, CommandSpec
 from app.core.env_probe import EnvProbe
 from app.core.env_validator import EnvValidator
 from app.core.i18n import pick
-from app.ui.widgets import MAX_LOG_BLOCKS
+from app.ui.widgets import configure_table, MAX_LOG_BLOCKS
 from app.core.settings_manager import AppSettings
 from app.ui.theme import badge_style, heading_style, hint_style, resolve
 from app.core.setup_manager import SetupManager
@@ -78,6 +78,7 @@ class SetupTab(QWidget):
                 pick(self.lang, "Detalle", "Detail"),
             ]
         )
+        configure_table(self.status_table, stretch_column=2, visible_rows=8)
         self.detected_label = QLabel()
         self.detected_label.setWordWrap(True)
         self.log = QTextEdit()
