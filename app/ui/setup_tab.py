@@ -192,6 +192,10 @@ class SetupTab(QWidget):
         for step in self._wizard_steps:
             self.step_list.addItem(QListWidgetItem(step))
 
+        # Five short steps in a scrollable box showed two and a half of them.
+        self.step_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.step_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
         content_row = QVBoxLayout()
         content_row.setSpacing(18)
 
@@ -490,6 +494,26 @@ class SetupTab(QWidget):
         self.status_table.resizeColumnsToContents()
         self._sync_action_gates()
         self._finish_activity(True, pick(self.lang, "Validación lista", "Validation ready"))
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        """Size the step list to its contents.
+
+        Row heights come from the window stylesheet, which is applied after
+        this widget is constructed, so the measurement has to wait until the
+        page is actually shown.
+        """
+        super().showEvent(event)
+        self._fit_step_list()
+
+    def _fit_step_list(self) -> None:
+        count = self.step_list.count()
+        if not count:
+            return
+        spacing = self.step_list.spacing()
+        total = sum(self.step_list.sizeHintForRow(row) for row in range(count))
+        height = total + 2 * spacing * count + 2 * self.step_list.frameWidth()
+        if height != self.step_list.height():
+            self.step_list.setFixedHeight(height)
 
     def rescan_environment(self) -> None:
         """Re-probe the machine after something changed, without blocking the UI."""

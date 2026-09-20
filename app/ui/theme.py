@@ -310,6 +310,15 @@ def build_stylesheet(theme: Theme) -> str:
         font-weight: 700;
     }}
     QTableWidget {{ gridline-color: {theme.border}; }}
+    /* The corner button between the two headers keeps the raw palette colour
+       and showed up as a white square in dark mode. */
+    QTableCornerButton::section {{
+        background: {theme.surface_alt};
+        border: 0;
+        border-bottom: 1px solid {theme.border};
+        border-right: 1px solid {theme.border};
+    }}
+    QHeaderView {{ background: {theme.surface_alt}; }}
     QPushButton, QToolButton {{
         background: {theme.surface};
         border: 1px solid {theme.border_strong};
