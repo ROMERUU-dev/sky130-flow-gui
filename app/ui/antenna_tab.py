@@ -22,7 +22,7 @@ from app.core.i18n import pick
 from app.core.log_parser import LogParser
 from app.core.settings_manager import AppSettings
 from app.runners.antenna_runner import AntennaRunner
-from app.ui.widgets import append_log
+from app.ui.widgets import MAX_LOG_BLOCKS, append_log
 
 
 class AntennaTab(QWidget):
@@ -46,6 +46,7 @@ class AntennaTab(QWidget):
         self.summary = QLineEdit()
         self.summary.setReadOnly(True)
         self.log = QTextEdit()
+        self.log.document().setMaximumBlockCount(MAX_LOG_BLOCKS)
         self.log.setReadOnly(True)
         self._last_report_path = ""
 

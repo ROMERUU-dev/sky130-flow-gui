@@ -23,7 +23,7 @@ from app.core.i18n import pick
 from app.core.log_parser import LogParser
 from app.core.settings_manager import AppSettings
 from app.runners.lvs_runner import LvsRunner
-from app.ui.widgets import append_log
+from app.ui.widgets import MAX_LOG_BLOCKS, append_log
 
 
 class LvsTab(QWidget):
@@ -49,6 +49,7 @@ class LvsTab(QWidget):
         self.summary = QLineEdit()
         self.summary.setReadOnly(True)
         self.log = QTextEdit()
+        self.log.document().setMaximumBlockCount(MAX_LOG_BLOCKS)
         self.log.setReadOnly(True)
         self.run_btn = QPushButton(pick(self.lang, "Correr", "Run"))
         self.stop_btn = QPushButton(pick(self.lang, "Detener", "Stop"))

@@ -27,12 +27,14 @@ import pyqtgraph as pg
 import pyqtgraph.exporters
 
 from app.core.i18n import pick
+from app.core.waveform_export import write_csv
 from app.ui.theme import THEME_SYSTEM, Theme, resolve
 
 
 class WaveformViewer(QWidget):
     """Waveform viewer ready for real parsed ngspice signals."""
 
+    export_finished = Signal(str)
     signal_changed = Signal(str)
 
     def __init__(self, language: str = "es", theme: Theme | None = None) -> None:
@@ -52,6 +54,7 @@ class WaveformViewer(QWidget):
         self.clear_overlay_btn = QPushButton(pick(self.lang, "Limpiar overlay", "Clear Overlay"))
         self.export_png_btn = QPushButton("Export PNG")
         self.export_svg_btn = QPushButton("Export SVG")
+        self.export_csv_btn = QPushButton("Export CSV")
         self.signal_stats = QLabel(pick(self.lang, "Sin datos", "No data"))
 
         layout = QVBoxLayout(self)
@@ -74,6 +77,7 @@ class WaveformViewer(QWidget):
         controls.addWidget(self.clear_overlay_btn)
         controls.addWidget(self.export_png_btn)
         controls.addWidget(self.export_svg_btn)
+        controls.addWidget(self.export_csv_btn)
         layout.addLayout(controls)
         layout.addWidget(self.empty_label)
         layout.addWidget(self.plot)
@@ -109,6 +113,7 @@ class WaveformViewer(QWidget):
         self.clear_overlay_btn.clicked.connect(self._clear_overlay_signals)
         self.export_png_btn.clicked.connect(lambda: self._export_plot("png"))
         self.export_svg_btn.clicked.connect(lambda: self._export_plot("svg"))
+        self.export_csv_btn.clicked.connect(self._export_csv)
         self.signal_select.currentTextChanged.connect(self.signal_changed.emit)
 
     def set_signals(self, signals: dict[str, tuple[list[float], list[float]]]) -> None:
@@ -293,6 +298,58 @@ class WaveformViewer(QWidget):
             f"{pick(self.lang, 'Señales', 'Signals')}: {label}    X: {self._format_axis_value(min(primary_x))} -> {self._format_axis_value(max(primary_x))}    "
             f"Y: {self._format_axis_value(min(combined_y))} -> {self._format_axis_value(max(combined_y))}"
         )
+
+    def _export_csv(self) -> None:
+        """Save the selected trace, plus any overlays, as a CSV table."""
+        names = self._exportable_signal_names()
+        if not names:
+            QMessageBox.information(
+                self,
+                pick(self.lang, "Sin datos", "No data"),
+                pick(
+                    self.lang,
+                    "Carga una simulación y selecciona una señal antes de exportar.",
+                    "Load a simulation and select a signal before exporting.",
+                ),
+            )
+            return
+
+        default_name = f"{self._safe_file_name(names[0])}.csv"
+        selected_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export CSV",
+            str(Path.cwd() / default_name),
+            "CSV Files (*.csv)",
+        )
+        if not selected_path:
+            return
+
+        target = Path(selected_path)
+        if target.suffix.lower() != ".csv":
+            target = target.with_suffix(".csv")
+
+        try:
+            write_csv(target, self._signals, names, x_label=self._x_axis_label())
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                pick(self.lang, "Error al exportar", "Export error"),
+                str(exc),
+            )
+            return
+
+        self.export_finished.emit(str(target))
+
+    def _exportable_signal_names(self) -> list[str]:
+        names = []
+        if self._current_signal_name and self._current_signal_name in self._signals:
+            names.append(self._current_signal_name)
+        names.extend(name for name in self._overlay_signal_names if name in self._signals and name not in names)
+        return names
+
+    def _x_axis_label(self) -> str:
+        label = self.plot.getPlotItem().getAxis("bottom").labelText or "x"
+        return label.strip().lower().replace(" ", "_")
 
     def _export_plot(self, fmt: str) -> None:
         if not self._current_signal_name or self._current_signal_name not in self._signals:

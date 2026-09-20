@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import cmath
 import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+import numpy
 
 
 ANALYSIS_DIRECTIVES = (".tran", ".ac", ".dc", ".save", ".plot", ".print", ".four")
@@ -184,13 +185,13 @@ def analyze_signal(
         raise ValueError("Not enough samples to analyze the signal")
 
     count = min(len(x_values), len(y_values))
-    x = [float(value) for value in x_values[:count]]
-    y = [float(value) for value in y_values[:count]]
+    x = numpy.asarray(x_values[:count], dtype=float)
+    y = numpy.asarray(y_values[:count], dtype=float)
 
-    y_min = min(y)
-    y_max = max(y)
-    mean = sum(y) / len(y)
-    rms = math.sqrt(sum(value * value for value in y) / len(y))
+    y_min = float(y.min())
+    y_max = float(y.max())
+    mean = float(y.mean())
+    rms = float(numpy.sqrt(numpy.mean(y * y)))
     peak_to_peak = y_max - y_min
     amplitude = peak_to_peak / 2.0
 
@@ -220,54 +221,53 @@ def analyze_signal(
     return metrics, spectrum
 
 
-def compute_spectrum(x_values: list[float], y_values: list[float], max_samples: int = 512) -> SpectrumData:
-    """Compute a lightweight DFT for display and dominant-frequency detection."""
+def compute_spectrum(x_values: list[float], y_values: list[float], max_samples: int = 16384) -> SpectrumData:
+    """Compute the magnitude spectrum used for display and dominant-frequency detection.
+
+    This used to evaluate a naive DFT in Python, one ``cmath.exp`` per sample
+    per bin. That is quadratic, so it had to be capped at 512 samples, which
+    both cost a noticeable pause per signal and left the frequency resolution
+    coarse. An FFT is fast enough to keep far more of the trace.
+    """
     count = min(len(x_values), len(y_values))
     if count < 4:
         return SpectrumData([], [], None)
 
-    x = [float(value) for value in x_values[:count]]
-    y = [float(value) for value in y_values[:count]]
+    x = numpy.asarray(x_values[:count], dtype=float)
+    y = numpy.asarray(y_values[:count], dtype=float)
     step = max(1, math.ceil(count / max_samples))
     sampled_x = x[::step]
     sampled_y = y[::step]
-    if len(sampled_x) < 4:
+    if sampled_x.size < 4:
         return SpectrumData([], [], None)
 
-    trimmed_length = _largest_power_of_two(len(sampled_y))
+    trimmed_length = _largest_power_of_two(int(sampled_y.size))
     sampled_x = sampled_x[:trimmed_length]
     sampled_y = sampled_y[:trimmed_length]
     if trimmed_length < 4:
         return SpectrumData([], [], None)
 
-    mean = sum(sampled_y) / trimmed_length
-    centered = [value - mean for value in sampled_y]
-    dt = (sampled_x[-1] - sampled_x[0]) / max(trimmed_length - 1, 1)
+    dt = float(sampled_x[-1] - sampled_x[0]) / max(trimmed_length - 1, 1)
     if dt <= 0:
         return SpectrumData([], [], None)
 
-    frequencies: list[float] = []
-    magnitudes: list[float] = []
-    dominant_frequency = None
-    dominant_magnitude = -1.0
+    centered = sampled_y - sampled_y.mean()
+    # Bin 0 is the (removed) DC term and the Nyquist bin is dropped, matching
+    # the range the previous implementation reported.
+    coefficients = numpy.fft.rfft(centered)[1:trimmed_length // 2]
+    if coefficients.size == 0:
+        return SpectrumData([], [], None)
 
-    half = trimmed_length // 2
-    for index in range(1, half):
-        coeff = 0j
-        for sample_index, sample in enumerate(centered):
-            angle = -2.0 * math.pi * index * sample_index / trimmed_length
-            coeff += sample * cmath.exp(1j * angle)
+    magnitudes = numpy.abs(coefficients) / trimmed_length
+    indices = numpy.arange(1, coefficients.size + 1, dtype=float)
+    frequencies = indices / (trimmed_length * dt)
 
-        magnitude = abs(coeff) / trimmed_length
-        frequency = index / (trimmed_length * dt)
-        frequencies.append(frequency)
-        magnitudes.append(magnitude)
-
-        if magnitude > dominant_magnitude:
-            dominant_magnitude = magnitude
-            dominant_frequency = frequency
-
-    return SpectrumData(frequencies, magnitudes, dominant_frequency)
+    dominant_index = int(numpy.argmax(magnitudes))
+    return SpectrumData(
+        frequencies.tolist(),
+        magnitudes.tolist(),
+        float(frequencies[dominant_index]),
+    )
 
 
 def normalize_save_point(point: str) -> str:
@@ -404,20 +404,20 @@ def _estimate_phase(
         return None
 
     index = max(1, round(cycles))
-    signal_coeff = 0j
-    ref_coeff = 0j
-    signal_mean = sum(y_values[:count]) / count
-    ref_mean = sum(ref_values[:count]) / count
-    for sample_index in range(count):
-        angle = -2.0 * math.pi * index * sample_index / count
-        factor = cmath.exp(1j * angle)
-        signal_coeff += (y_values[sample_index] - signal_mean) * factor
-        ref_coeff += (ref_values[sample_index] - ref_mean) * factor
+    # One Goertzel-style bin evaluated over every sample. The loop version ran
+    # two complex exponentials per sample with no cap on the trace length.
+    signal = numpy.asarray(y_values[:count], dtype=float)
+    reference = numpy.asarray(ref_values[:count], dtype=float)
+    sample_indices = numpy.arange(count, dtype=float)
+    factors = numpy.exp(-2.0j * math.pi * index * sample_indices / count)
+    signal_coeff = complex(numpy.dot(signal - signal.mean(), factors))
+    ref_coeff = complex(numpy.dot(reference - reference.mean(), factors))
 
     if abs(signal_coeff) < PHASE_EPSILON or abs(ref_coeff) < PHASE_EPSILON:
         return None
 
-    phase = math.degrees(cmath.phase(signal_coeff) - cmath.phase(ref_coeff))
+    phase = math.degrees(math.atan2(signal_coeff.imag, signal_coeff.real)
+                         - math.atan2(ref_coeff.imag, ref_coeff.real))
     while phase <= -180.0:
         phase += 360.0
     while phase > 180.0:

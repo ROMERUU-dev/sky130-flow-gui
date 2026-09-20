@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import struct
-import math
 from pathlib import Path
+
+import numpy
 
 
 class NgspiceRawParser:
@@ -41,36 +41,27 @@ class NgspiceRawParser:
         names = header["variables"]
         x_name = names[0]
 
+        # A transient run easily produces a few hundred thousand points across
+        # a dozen traces.  Unpacking that with struct into Python lists cost
+        # seconds and a lot of memory, so the payload is read as one array and
+        # sliced per variable.
+        raw = numpy.frombuffer(payload, dtype="<f8", count=num_vars * num_points * (value_size // 8))
+
         if flags == "real":
-            rows = struct.iter_unpack(f"<{num_vars}d", payload[:expected_size])
-            x_values: list[float] = []
-            y_values: dict[str, list[float]] = {name: [] for name in names[1:]}
-
-            for row in rows:
-                x_values.append(float(row[0]))
-                for idx, name in enumerate(names[1:], start=1):
-                    y_values[name].append(float(row[idx]))
-
-            for name in names[1:]:
-                signals[name] = (x_values, y_values[name])
+            table = raw.reshape(num_points, num_vars)
+            x_values = table[:, 0].tolist()
+            for index, name in enumerate(names[1:], start=1):
+                signals[name] = (x_values, table[:, index].tolist())
         else:
-            rows = struct.iter_unpack(f"<{num_vars * 2}d", payload[:expected_size])
-            x_values: list[float] = []
-            magnitude_values: dict[str, list[float]] = {name: [] for name in names[1:]}
-            phase_values: dict[str, list[float]] = {name: [] for name in names[1:]}
-
-            for row in rows:
-                x_values.append(float(row[0]))
-                for idx, name in enumerate(names[1:], start=1):
-                    real = float(row[idx * 2])
-                    imag = float(row[idx * 2 + 1])
-                    magnitude = math.hypot(real, imag)
-                    magnitude_values[name].append(20.0 * math.log10(max(magnitude, 1e-30)))
-                    phase_values[name].append(math.degrees(math.atan2(imag, real)))
-
-            for name in names[1:]:
-                signals[f"mag({name})"] = (x_values, magnitude_values[name])
-                signals[f"phase({name})"] = (x_values, phase_values[name])
+            table = raw.reshape(num_points, num_vars * 2)
+            x_values = table[:, 0].tolist()
+            for index, name in enumerate(names[1:], start=1):
+                real = table[:, index * 2]
+                imag = table[:, index * 2 + 1]
+                magnitude = numpy.hypot(real, imag)
+                decibels = 20.0 * numpy.log10(numpy.maximum(magnitude, 1e-30))
+                signals[f"mag({name})"] = (x_values, decibels.tolist())
+                signals[f"phase({name})"] = (x_values, numpy.degrees(numpy.arctan2(imag, real)).tolist())
 
         # Expose the independent variable too in case the user wants to inspect it directly.
         signals[x_name] = (list(range(len(x_values))), x_values)

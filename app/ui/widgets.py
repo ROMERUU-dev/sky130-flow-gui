@@ -73,3 +73,21 @@ class CollapsibleSection(QWidget):
 
     def is_expanded(self) -> bool:
         return self.toggle.isChecked()
+
+
+MAX_LOG_BLOCKS = 5000
+
+
+def make_log_view(placeholder: str = "") -> QTextEdit:
+    """Create a read-only log view that discards its oldest lines.
+
+    A long extraction or a verbose ngspice run can emit hundreds of thousands
+    of lines. An unbounded QTextEdit keeps every one of them, which grew the
+    process memory and made the widget slower the longer a session ran.
+    """
+    view = QTextEdit()
+    view.setReadOnly(True)
+    view.document().setMaximumBlockCount(MAX_LOG_BLOCKS)
+    if placeholder:
+        view.setPlaceholderText(placeholder)
+    return view

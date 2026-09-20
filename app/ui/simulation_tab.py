@@ -67,7 +67,7 @@ from app.services.em_netlist_instrumentation import (
 )
 from app.ui.theme import resolve
 from app.ui.waveform_viewer import WaveformViewer
-from app.ui.widgets import CollapsibleSection, append_log
+from app.ui.widgets import MAX_LOG_BLOCKS, CollapsibleSection, append_log
 
 
 class SimulationTab(QWidget):
@@ -89,6 +89,7 @@ class SimulationTab(QWidget):
         self.generated_path_edit = QLineEdit()
         self.generated_path_edit.setReadOnly(True)
         self.log = QTextEdit()
+        self.log.document().setMaximumBlockCount(MAX_LOG_BLOCKS)
         self.log.setReadOnly(True)
         self.file_view = QTextEdit()
         self.file_view.setPlaceholderText(
@@ -824,6 +825,8 @@ class SimulationTab(QWidget):
         self.spectrum_export_png_btn.clicked.connect(lambda: self._export_spectrum_plot("png"))
         self.spectrum_export_svg_btn.clicked.connect(lambda: self._export_spectrum_plot("svg"))
         self.wave.signal_changed.connect(self._sync_metric_selection)
+        self.wave.export_finished.connect(self._on_export_finished)
+        self.runner.queue_changed.connect(self._on_queue_changed)
         self.paste_netlist_btn.clicked.connect(self._paste_netlist)
         self.generate_em_checkbox.toggled.connect(self._sync_em_options_state)
         self.debug_em_only_checkbox.toggled.connect(self._sync_em_options_state)
@@ -1722,6 +1725,16 @@ class SimulationTab(QWidget):
             if index >= 0:
                 self.metric_reference.setCurrentIndex(index)
         self.metric_reference.blockSignals(False)
+
+    def _on_export_finished(self, path: str) -> None:
+        self._append_log(pick(self.lang, f"\nCSV exportado: {path}\n", f"\nCSV exported: {path}\n"))
+        self.send_status.emit(pick(self.lang, "CSV exportado", "CSV exported"))
+
+    def _on_queue_changed(self, pending: int) -> None:
+        if pending:
+            self.send_status.emit(
+                pick(self.lang, f"{pending} en cola", f"{pending} queued")
+            )
 
     def _sync_metric_selection(self, signal_name: str) -> None:
         if not signal_name:

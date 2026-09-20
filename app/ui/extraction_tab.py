@@ -25,7 +25,7 @@ from app.core.layout_tools import infer_top_cell, resolve_layout_dir
 from app.core.magic_launcher import MagicLaunchBuilder
 from app.core.settings_manager import AppSettings
 from app.runners.magic_runner import MagicRunner
-from app.ui.widgets import append_log
+from app.ui.widgets import MAX_LOG_BLOCKS, append_log
 
 
 class ExtractionTab(QWidget):
@@ -48,6 +48,7 @@ class ExtractionTab(QWidget):
         self.output_dir = QLineEdit()
         self.output_dir.setReadOnly(True)
         self.log = QTextEdit()
+        self.log.document().setMaximumBlockCount(MAX_LOG_BLOCKS)
         self.log.setReadOnly(True)
 
         self._out_netlist = ""
