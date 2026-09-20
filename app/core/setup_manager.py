@@ -110,6 +110,20 @@ class SetupManager:
     def pdk_bundle_install_script(self) -> Path:
         return self.repo_root / "scripts" / "install_tt_pdk_bundle.py"
 
+    def docker_install_script(self) -> Path:
+        return self.repo_root / "scripts" / "install_docker_ubuntu.sh"
+
+    def digital_flow_image_script(self) -> Path:
+        return self.repo_root / "scripts" / "install_openlane.sh"
+
+    def docker_install_command(self) -> list[str]:
+        """Installing a container runtime is a system change, so it needs pkexec."""
+        return ["pkexec", "/bin/bash", str(self.docker_install_script())]
+
+    def digital_flow_image_command(self) -> list[str]:
+        """Pulling the image runs as the desktop user."""
+        return ["/bin/bash", str(self.digital_flow_image_script()), self.manifest.default_channel()]
+
     def pdk_prebuilt_install_script(self) -> Path:
         return self.repo_root / "scripts" / "install_sky130_pdk_ciel.sh"
 

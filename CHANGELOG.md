@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Optional digital flow through a container.** The Setup Assistant can now
+  install a container runtime and download LibreLane — the maintained successor
+  to OpenLane 2 — whose image carries OpenROAD, Yosys, Magic, KLayout and
+  netgen. Nothing extra lands on the host. Docker comes from Ubuntu's own
+  `docker.io` package rather than a third-party repository, so it keeps getting
+  security updates through apt. The assistant distinguishes a missing runtime, a
+  stopped daemon, and the case where the `docker` group was granted but the
+  current session predates it — which is the one that confuses everybody.
 - **Runs are recorded and survive a restart.** What used to be called history
   was a glob of `*.raw` files: it showed that output existed, but not which
   netlist produced it, how long it took, or whether it actually succeeded, and

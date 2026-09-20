@@ -47,6 +47,16 @@ class ChannelPolicy:
     pdk_preferred_sources: tuple[str, ...]
     pdk_search_roots: tuple[str, ...]
     tool_minimum_versions: tuple[tuple[str, str], ...]
+    digital_flow_enabled: bool
+    digital_flow_provider: str
+    digital_flow_description: str
+    digital_flow_image: str
+    digital_flow_version: str
+    digital_flow_includes: tuple[str, ...]
+    digital_flow_minimum_free_gb: int
+    digital_flow_download_gb: float
+    digital_flow_project_url: str
+    digital_flow_runtime_packages: tuple[str, ...]
 
 
 class DependencyManifest:
@@ -73,6 +83,7 @@ class DependencyManifest:
         pdk = raw_channel.get("pdk", {})
         prebuilt = pdk.get("prebuilt", {})
         minimum_versions = raw_channel.get("tool_minimum_versions", {})
+        digital = raw_channel.get("digital_flow", {})
         return ChannelPolicy(
             name=channel_name,
             description=str(raw_channel.get("description", "")),
@@ -110,6 +121,16 @@ class DependencyManifest:
             pdk_preferred_sources=tuple(str(item) for item in pdk.get("preferred_sources", [])),
             pdk_search_roots=tuple(str(item) for item in pdk.get("search_roots", [])),
             tool_minimum_versions=tuple((str(k), str(v)) for k, v in minimum_versions.items()),
+            digital_flow_enabled=bool(digital.get("enabled", False)),
+            digital_flow_provider=str(digital.get("provider", "")),
+            digital_flow_description=str(digital.get("description", "")),
+            digital_flow_image=str(digital.get("image", "")),
+            digital_flow_version=str(digital.get("version", "")),
+            digital_flow_includes=tuple(str(item) for item in digital.get("includes", [])),
+            digital_flow_minimum_free_gb=int(digital.get("minimum_free_gb", 12)),
+            digital_flow_download_gb=float(digital.get("download_gb", 0.0)),
+            digital_flow_project_url=str(digital.get("project_url", "")),
+            digital_flow_runtime_packages=tuple(str(item) for item in digital.get("runtime_packages", [])),
         )
 
     def _load_json(self) -> dict:

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.command_runner import CommandRunner, CommandSpec
+from app.core.container_tools import detect_runtime, image_present
 from app.core.env_probe import EnvProbe
 from app.core.env_validator import EnvValidator
 from app.core.i18n import pick
@@ -107,6 +108,8 @@ class SetupTab(QWidget):
         self._pdk_preflight = None
         self._pdk_source_preflight = None
         self._pdk_bundle_preflight = None
+        self._container_runtime = None
+        self._digital_flow_ready = False
         self._runner_action = ""
 
         self.validate_btn = QPushButton(pick(self.lang, "Validar entorno", "Validate environment"))
@@ -117,6 +120,14 @@ class SetupTab(QWidget):
         self.use_pdk_btn = QPushButton(pick(self.lang, "Usar PDK seleccionado", "Use selected PDK"))
         self.install_managed_pdk_btn = QPushButton(pick(self.lang, "Instalar PDK gestionado", "Install managed PDK"))
         self.install_bundle_pdk_btn = QPushButton(pick(self.lang, "Descargar bundle PDK", "Download PDK bundle"))
+        self.install_docker_btn = QPushButton(
+            pick(self.lang, "Instalar Docker", "Install Docker"))
+        self.pull_digital_flow_btn = QPushButton(
+            pick(self.lang, "Descargar flujo digital (OpenLane + OpenROAD)",
+                 "Download digital flow (OpenLane + OpenROAD)"))
+        self.digital_flow_summary = QLabel()
+        self.digital_flow_summary.setWordWrap(True)
+
         self.install_prebuilt_pdk_btn = QPushButton(
             pick(self.lang, "Instalar PDK oficial  ·  recomendado", "Install official PDK  ·  recommended")
         )
@@ -273,8 +284,8 @@ class SetupTab(QWidget):
             self._page_hint(
                 pick(
                     self.lang,
-                    "Este paso instala paquetes del sistema para Ubuntu y compila Magic 8.3.634 desde la fuente oficial para SKY130. No crea ni toca el entorno Python XDG del usuario.",
-                    "This step installs Ubuntu system packages and builds Magic 8.3.634 from the official source release for SKY130. It does not create or modify the user-owned XDG Python environment.",
+                    "Este paso instala paquetes del sistema para Ubuntu y compila Magic desde la fuente oficial para SKY130. No toca el entorno Python del usuario.",
+                    "This step installs Ubuntu system packages and builds Magic from the official source release for SKY130. It does not touch the user Python environment.",
                 )
             )
         )
@@ -282,6 +293,25 @@ class SetupTab(QWidget):
         actions.addWidget(self.install_btn)
         actions.addStretch(1)
         layout.addLayout(actions)
+
+        layout.addWidget(self._page_heading(
+            pick(self.lang, "Flujo digital (opcional)", "Digital flow (optional)"), size=16))
+        layout.addWidget(self._page_hint(
+            pick(
+                self.lang,
+                "OpenLane y OpenROAD corren dentro de un contenedor, así que no se instalan "
+                "paquetes extra en tu sistema. Sólo hace falta si vas a hacer flujo digital.",
+                "OpenLane and OpenROAD run inside a container, so no extra packages land on "
+                "your system. You only need this for the digital flow.",
+            )
+        ))
+        layout.addWidget(self.digital_flow_summary)
+        digital_actions = QHBoxLayout()
+        digital_actions.addWidget(self.install_docker_btn)
+        digital_actions.addWidget(self.pull_digital_flow_btn)
+        digital_actions.addStretch(1)
+        layout.addLayout(digital_actions)
+
         layout.addWidget(QLabel(pick(self.lang, "Log del asistente", "Assistant log")))
         layout.addWidget(self.log, 1)
         return page
@@ -394,9 +424,9 @@ class SetupTab(QWidget):
         layout.addWidget(final_hint)
         return page
 
-    def _page_heading(self, text: str) -> QLabel:
+    def _page_heading(self, text: str, size: int = 18) -> QLabel:
         label = QLabel(text)
-        label.setStyleSheet(heading_style(self._theme, 18))
+        label.setStyleSheet(heading_style(self._theme, size))
         return label
 
     def _page_hint(self, text: str) -> QLabel:
@@ -428,6 +458,8 @@ class SetupTab(QWidget):
         self.install_managed_pdk_btn.clicked.connect(self.install_managed_pdk)
         self.install_bundle_pdk_btn.clicked.connect(self.install_bundle_pdk)
         self.install_prebuilt_pdk_btn.clicked.connect(self.install_prebuilt_pdk)
+        self.install_docker_btn.clicked.connect(self.install_docker)
+        self.pull_digital_flow_btn.clicked.connect(self.pull_digital_flow)
         self.check_source_build_btn.clicked.connect(self.refresh_pdk_source_preflight)
         self.build_from_sources_btn.clicked.connect(self.build_pdk_from_sources)
         self.pdk_candidate_combo.currentIndexChanged.connect(self._update_pdk_candidate_summary)
@@ -605,6 +637,7 @@ class SetupTab(QWidget):
         self._refresh_pdk_preflight()
         self.refresh_pdk_bundle_preflight()
         self.refresh_pdk_prebuilt_summary()
+        self.refresh_digital_flow_summary()
         self.refresh_pdk_source_preflight()
         self._update_pdk_candidate_summary()
         self._sync_action_gates()
@@ -740,6 +773,85 @@ class SetupTab(QWidget):
                 "Installs as the normal user, without sudo.",
             )
         )
+
+    def refresh_digital_flow_summary(self) -> None:
+        """Describe the container runtime and whether the image is present."""
+        policy = self.setup_mgr.manifest.channel()
+        if not policy.digital_flow_enabled:
+            self.digital_flow_summary.setText(
+                pick(self.lang, "Flujo digital deshabilitado en este canal.",
+                     "Digital flow disabled in this channel.")
+            )
+            self._digital_flow_ready = False
+            return
+
+        runtime = detect_runtime()
+        self._container_runtime = runtime
+        has_image = image_present(policy.digital_flow_image, runtime) if runtime.ready else False
+        self._digital_flow_ready = has_image
+
+        tools = ", ".join(policy.digital_flow_includes)
+        lines = [
+            pick(self.lang, f"Imagen: {policy.digital_flow_image}", f"Image: {policy.digital_flow_image}"),
+            pick(self.lang, f"Incluye: {tools}", f"Includes: {tools}"),
+            pick(self.lang, f"Descarga: ~{policy.digital_flow_download_gb} GB",
+                 f"Download: ~{policy.digital_flow_download_gb} GB"),
+            pick(self.lang, f"Runtime: {runtime.message}", f"Runtime: {runtime.message}"),
+            pick(
+                self.lang,
+                f"Imagen descargada: {'sí' if has_image else 'no'}",
+                f"Image downloaded: {'yes' if has_image else 'no'}",
+            ),
+        ]
+        self.digital_flow_summary.setText("\n".join(lines))
+
+    def install_docker(self) -> None:
+        """Install the container runtime. This is a privileged system change."""
+        script = self.setup_mgr.docker_install_script()
+        if not script.is_file():
+            self.log.append(pick(self.lang, f"Script no encontrado: {script}\n",
+                                 f"Script not found: {script}\n"))
+            return
+        self._begin_activity(pick(self.lang, "Instalando Docker...", "Installing Docker..."))
+        self.log.append(
+            pick(
+                self.lang,
+                "Instalando docker.io desde los repositorios de Ubuntu y agregando tu usuario "
+                "al grupo `docker`. Al terminar tendrás que cerrar sesión para que aplique.\n",
+                "Installing docker.io from the Ubuntu repositories and adding your user to the "
+                "`docker` group. You will need to log out before it takes effect.\n",
+            )
+        )
+        self.send_status.emit(pick(self.lang, "Instalando Docker", "Installing Docker"))
+        self._runner_action = "install_docker"
+        self.runner.run(CommandSpec(command=self.setup_mgr.docker_install_command()))
+
+    def pull_digital_flow(self) -> None:
+        """Download the LibreLane image, which carries OpenLane and OpenROAD."""
+        runtime = getattr(self, "_container_runtime", None) or detect_runtime()
+        if not runtime.ready:
+            self.log.append(f"\n{runtime.message}\n")
+            if runtime.needs_relogin:
+                self.log.append(
+                    pick(self.lang,
+                         "Cierra sesión y vuelve a entrar; el grupo `docker` ya está concedido.\n",
+                         "Log out and back in; the `docker` group is already granted.\n")
+                )
+            return
+        script = self.setup_mgr.digital_flow_image_script()
+        if not script.is_file():
+            self.log.append(pick(self.lang, f"Script no encontrado: {script}\n",
+                                 f"Script not found: {script}\n"))
+            return
+        self._begin_activity(pick(self.lang, "Descargando flujo digital...", "Downloading digital flow..."))
+        self.log.append(
+            pick(self.lang,
+                 "Descargando la imagen de LibreLane (~1.6 GB). Puede tardar varios minutos.\n",
+                 "Downloading the LibreLane image (~1.6 GB). This can take several minutes.\n")
+        )
+        self.send_status.emit(pick(self.lang, "Descargando flujo digital", "Downloading digital flow"))
+        self._runner_action = "pull_digital_flow"
+        self.runner.run(CommandSpec(command=self.setup_mgr.digital_flow_image_command()))
 
     def install_prebuilt_pdk(self) -> None:
         """Install sky130A from the upstream prebuilt releases."""
@@ -961,6 +1073,48 @@ class SetupTab(QWidget):
             )
             self.send_status.emit(pick(self.lang, "PDK oficial falló", "Official PDK failed"))
             self._finish_activity(False, pick(self.lang, "PDK oficial falló", "Official PDK failed"))
+            return
+
+        if action == "install_docker":
+            if code == 0:
+                self.log.append(
+                    pick(
+                        self.lang,
+                        "\nDocker instalado. Cierra sesión y vuelve a entrar para que el grupo "
+                        "`docker` aplique, y luego descarga el flujo digital.\n",
+                        "\nDocker installed. Log out and back in so the `docker` group applies, "
+                        "then download the digital flow.\n",
+                    )
+                )
+                self.send_status.emit(pick(self.lang, "Docker instalado", "Docker installed"))
+            else:
+                self.log.append(
+                    pick(self.lang,
+                         f"\nLa instalación de Docker falló (exit={code}, status={status}).\n",
+                         f"\nDocker installation failed (exit={code}, status={status}).\n")
+                )
+                self.send_status.emit(pick(self.lang, "Docker falló", "Docker failed"))
+            self.refresh_digital_flow_summary()
+            self._finish_activity(code == 0, pick(self.lang, "Docker", "Docker"))
+            return
+
+        if action == "pull_digital_flow":
+            if code == 0:
+                self.log.append(
+                    pick(self.lang,
+                         "\nFlujo digital listo. La imagen trae OpenROAD, Yosys, Magic, KLayout y netgen.\n",
+                         "\nDigital flow ready. The image carries OpenROAD, Yosys, Magic, KLayout and netgen.\n")
+                )
+                self.send_status.emit(pick(self.lang, "Flujo digital listo", "Digital flow ready"))
+            else:
+                self.log.append(
+                    pick(self.lang,
+                         f"\nLa descarga del flujo digital falló (exit={code}, status={status}).\n",
+                         f"\nDigital flow download failed (exit={code}, status={status}).\n")
+                )
+                self.send_status.emit(pick(self.lang, "Flujo digital falló", "Digital flow failed"))
+            self.refresh_digital_flow_summary()
+            self._finish_activity(code == 0, pick(self.lang, "Flujo digital", "Digital flow"))
             return
 
         if action == "install_tools":
@@ -1245,6 +1399,27 @@ class SetupTab(QWidget):
                 "No candidates yet. Use `Find reusable PDK`.",
             ),
         )
+        runtime = getattr(self, "_container_runtime", None)
+        explain(
+            self.install_docker_btn,
+            pick(
+                self.lang,
+                "Docker ya está instalado y funcionando.",
+                "Docker is already installed and working.",
+            ),
+        )
+        explain(
+            self.pull_digital_flow_btn,
+            pick(
+                self.lang,
+                "La imagen del flujo digital ya está descargada."
+                if getattr(self, "_digital_flow_ready", False)
+                else (runtime.message if runtime is not None else "Instala Docker primero."),
+                "The digital flow image is already downloaded."
+                if getattr(self, "_digital_flow_ready", False)
+                else (runtime.message if runtime is not None else "Install Docker first."),
+            ),
+        )
         explain(
             self.apply_defaults_btn,
             pick(
@@ -1279,6 +1454,16 @@ class SetupTab(QWidget):
             and self._pdk_bundle_preflight.ready
         )
         self.install_prebuilt_pdk_btn.setEnabled(self._verification_completed)
+        runtime = getattr(self, "_container_runtime", None)
+        self.install_docker_btn.setEnabled(
+            self._verification_completed and (runtime is None or not runtime.ready)
+        )
+        self.pull_digital_flow_btn.setEnabled(
+            self._verification_completed
+            and runtime is not None
+            and runtime.ready
+            and not getattr(self, "_digital_flow_ready", False)
+        )
         self.check_source_build_btn.setEnabled(self._verification_completed)
         self.build_from_sources_btn.setEnabled(
             self._verification_completed

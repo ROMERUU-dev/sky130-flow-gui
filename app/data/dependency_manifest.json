@@ -126,6 +126,29 @@
           "repo": "https://github.com/RTimothyEdwards/netgen.git",
           "ref": "1.5.323"
         }
+      },
+      "digital_flow": {
+        "enabled": true,
+        "provider": "librelane",
+        "description": "LibreLane, the maintained successor to OpenLane 2. The image bundles OpenROAD, Yosys, Magic, KLayout and netgen, so the digital flow needs no host packages.",
+        "image": "ghcr.io/librelane/librelane:3.0.14",
+        "version": "3.0.14",
+        "includes": [
+          "openroad",
+          "yosys",
+          "magic",
+          "klayout",
+          "netgen"
+        ],
+        "minimum_free_gb": 12,
+        "download_gb": 1.6,
+        "project_url": "https://github.com/librelane/librelane",
+        "runtime_packages": [
+          "docker.io",
+          "docker-compose-v2"
+        ],
+        "install_script": "scripts/install_docker_ubuntu.sh",
+        "image_script": "scripts/install_openlane.sh"
       }
     },
     "latest-tested": {
@@ -252,6 +275,29 @@
           "repo": "https://github.com/RTimothyEdwards/netgen.git",
           "ref": "1.5.323"
         }
+      },
+      "digital_flow": {
+        "enabled": true,
+        "provider": "librelane",
+        "description": "LibreLane, the maintained successor to OpenLane 2. The image bundles OpenROAD, Yosys, Magic, KLayout and netgen, so the digital flow needs no host packages.",
+        "image": "ghcr.io/librelane/librelane:3.0.14",
+        "version": "3.0.14",
+        "includes": [
+          "openroad",
+          "yosys",
+          "magic",
+          "klayout",
+          "netgen"
+        ],
+        "minimum_free_gb": 12,
+        "download_gb": 1.6,
+        "project_url": "https://github.com/librelane/librelane",
+        "runtime_packages": [
+          "docker.io",
+          "docker-compose-v2"
+        ],
+        "install_script": "scripts/install_docker_ubuntu.sh",
+        "image_script": "scripts/install_openlane.sh"
       }
     }
   }
