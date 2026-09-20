@@ -121,5 +121,44 @@ class MagicScriptTest(unittest.TestCase):
         self.assertIn("load inverter", script)
 
 
+class PreferencesPlaceholderTest(unittest.TestCase):
+    """The empty deck field has to explain itself, not just sit there blank."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import os
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _placeholder_for(self, sky130a) -> str:
+        from app.core.settings_manager import AppSettings
+        from app.ui.preferences_tab import PreferencesTab
+
+        tab = PreferencesTab.__new__(PreferencesTab)
+        tab.lang = "es"
+        return PreferencesTab._antenna_deck_placeholder(tab, str(sky130a))
+
+    def test_a_pdk_without_a_deck_points_at_magic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            sky130a = _pdk(Path(tmp), magic_antenna=True)
+
+            self.assertIn("Magic", self._placeholder_for(sky130a))
+
+    def test_no_placeholder_when_a_deck_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            sky130a = _pdk(Path(tmp), deck_name="drc/sky130A_ant.rb")
+
+            self.assertEqual(self._placeholder_for(sky130a), "")
+
+    def test_a_pdk_with_no_rules_at_all_says_so(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            sky130a = _pdk(Path(tmp))
+
+            self.assertIn("no se detectaron", self._placeholder_for(sky130a).lower())
+
+
 if __name__ == "__main__":
     unittest.main()

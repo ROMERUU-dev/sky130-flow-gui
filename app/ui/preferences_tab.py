@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.command_runner import CommandRunner, CommandSpec
+from app.core.antenna_tools import detect_antenna_support
 from app.core.background import BackgroundTask
 from app.core.env_probe import EnvProbe
 from app.core.env_validator import EnvValidator
@@ -104,8 +105,14 @@ class PreferencesTab(QWidget):
         self._probe.finished.connect(lambda _diagnosis: self.refresh_validation())
         self._probe.start(self.settings, self.lang)
 
-    def _add_path_row(self, form: QFormLayout, key: str, label: str, value: str, is_dir: bool = False) -> None:
+    def _add_path_row(self, form: QFormLayout, key: str, label: str, value: str,
+                      is_dir: bool = False, placeholder: str = "") -> None:
         edit = QLineEdit(value)
+        if placeholder:
+            # An empty path field with no explanation reads as something
+            # missing, even when there is genuinely nothing to put there.
+            edit.setPlaceholderText(placeholder)
+            edit.setToolTip(placeholder)
         self.fields[key] = edit
         row = QHBoxLayout()
         row.addWidget(edit)
@@ -116,6 +123,23 @@ class PreferencesTab(QWidget):
             b.clicked.connect(lambda: browse_file(self, edit, pick(self.lang, f"Selecciona {label}", f"Select {label}")))
         row.addWidget(b)
         form.addRow(label, row)
+
+    def _antenna_deck_placeholder(self, sky130a: str) -> str:
+        """Explain an empty deck field in terms of what the PDK actually ships."""
+        support = detect_antenna_support(sky130a)
+        if support.has_klayout_deck:
+            return ""
+        if support.magic_available:
+            return pick(
+                self.lang,
+                "Opcional — este PDK no trae deck de antena; Antena usa Magic antennacheck",
+                "Optional — this PDK ships no antenna deck; Antenna uses Magic antennacheck",
+            )
+        return pick(
+            self.lang,
+            "Opcional — no se detectaron reglas de antena en este PDK",
+            "Optional — no antenna rules were detected in this PDK",
+        )
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -152,7 +176,13 @@ class PreferencesTab(QWidget):
         self._add_path_row(form, "pdk.sky130a", "SKY130A", pdk["sky130a"], is_dir=True)
         self._add_path_row(form, "pdk.magic_rc", "Magic rcfile", pdk["magic_rc"])
         self._add_path_row(form, "pdk.netgen_setup", "Netgen setup", pdk["netgen_setup"])
-        self._add_path_row(form, "pdk.klayout_antenna_deck", "KLayout antenna deck", pdk["klayout_antenna_deck"])
+        self._add_path_row(
+            form,
+            "pdk.klayout_antenna_deck",
+            "KLayout antenna deck",
+            pdk["klayout_antenna_deck"],
+            placeholder=self._antenna_deck_placeholder(pdk["sky130a"]),
+        )
 
         general_layout.addLayout(form)
         pdk_usage_note = QLabel(

@@ -38,6 +38,10 @@
 
 ### Interface
 
+- **The empty antenna-deck field explains itself.** sky130A ships no KLayout
+  antenna deck, so that Preferences field is legitimately blank — but a blank
+  field with only a label still reads as something missing. It now carries a
+  placeholder saying the PDK has no deck and that the Antenna page uses Magic.
 - **A warmer dark theme.** The dark palette was blue-tinted, which fought the
   accent colours the pages use for status. It is now warm neutral grey with a
   terracotta accent.
