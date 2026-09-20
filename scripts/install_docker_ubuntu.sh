@@ -6,7 +6,27 @@
 # through Ubuntu's own security updates.
 set -euo pipefail
 
-TARGET_USER="${SUDO_USER:-${USER:-$(id -un)}}"
+# Work out which account should get Docker access. pkexec does not set
+# SUDO_USER and resets USER to root, so PKEXEC_UID is the only reliable
+# pointer back to the desktop user when the app launches this.
+resolve_target_user() {
+  if [ -n "${PKEXEC_UID:-}" ]; then
+    getent passwd "$PKEXEC_UID" | cut -d: -f1
+    return
+  fi
+  if [ -n "${SUDO_USER:-}" ]; then
+    printf '%s\n' "$SUDO_USER"
+    return
+  fi
+  if [ -n "${SKY130_TARGET_USER:-}" ]; then
+    printf '%s\n' "$SKY130_TARGET_USER"
+    return
+  fi
+  # Last resort: the owner of the session that invoked us.
+  logname 2>/dev/null || id -un
+}
+
+TARGET_USER="$(resolve_target_user)"
 
 if ! command -v apt-get >/dev/null 2>&1; then
   echo "This installer supports Ubuntu/Debian systems with apt-get." >&2
@@ -18,9 +38,9 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-if [ "$TARGET_USER" = "root" ]; then
-  echo "Refusing to run without a desktop user to grant access to." >&2
-  echo "Run this through the app, or with sudo from your normal account." >&2
+if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ]; then
+  echo "Could not determine which desktop user should get Docker access." >&2
+  echo "Re-run with SKY130_TARGET_USER=<your-user>, or with sudo from that account." >&2
   exit 1
 fi
 

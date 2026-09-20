@@ -159,3 +159,56 @@ class DigitalFlowManifestTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DockerInstallScriptTest(unittest.TestCase):
+    """The script has to find the desktop user under pkexec, not just sudo."""
+
+    SCRIPT = "scripts/install_docker_ubuntu.sh"
+
+    def _resolve_user(self, env: dict[str, str]) -> str:
+        import pathlib
+        import re
+        import subprocess
+
+        source = pathlib.Path(self.SCRIPT).read_text(encoding="utf-8")
+        function = re.search(r"^resolve_target_user\(\) \{.*?^\}", source, re.S | re.M)
+        self.assertIsNotNone(function, "resolve_target_user() is missing from the script")
+        script = function.group(0) + "\nresolve_target_user\n"
+        result = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, env=env, check=False
+        )
+        return result.stdout.strip()
+
+    def test_pkexec_uid_identifies_the_desktop_user(self) -> None:
+        """pkexec leaves SUDO_USER unset and sets USER to root."""
+        import os
+
+        env = {"PATH": "/usr/bin:/bin", "PKEXEC_UID": str(os.getuid()), "USER": "root"}
+
+        import pwd
+
+        self.assertEqual(self._resolve_user(env), pwd.getpwuid(os.getuid()).pw_name)
+
+    def test_sudo_user_is_honoured(self) -> None:
+        env = {"PATH": "/usr/bin:/bin", "SUDO_USER": "someone", "USER": "root"}
+
+        self.assertEqual(self._resolve_user(env), "someone")
+
+    def test_an_explicit_override_is_honoured(self) -> None:
+        env = {"PATH": "/usr/bin:/bin", "SKY130_TARGET_USER": "override", "USER": "root"}
+
+        self.assertEqual(self._resolve_user(env), "override")
+
+    def test_pkexec_wins_over_sudo(self) -> None:
+        import os
+        import pwd
+
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "PKEXEC_UID": str(os.getuid()),
+            "SUDO_USER": "wrong",
+            "USER": "root",
+        }
+
+        self.assertEqual(self._resolve_user(env), pwd.getpwuid(os.getuid()).pw_name)
