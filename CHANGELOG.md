@@ -4,6 +4,21 @@
 
 ### Fixed
 
+- **A packaged install reported its own Python environment as broken.** The
+  validator only accepted a user virtualenv under the XDG data directory, so on
+  a `.deb` install — which ships its own interpreter — the environment check
+  failed and the overall status went to `error` while the app was visibly
+  running from a perfectly good environment. The running interpreter is now
+  accepted when it satisfies the requirements, and the row is labelled
+  `Entorno Python` rather than `Entorno Python XDG`.
+- **The KLayout antenna deck could never be detected for sky130A.** Detection
+  looked for one hardcoded filename, `sky130A_ant.rb`. sky130A ships no KLayout
+  antenna deck at all: its DRC deck contains zero antenna rules, and the rules
+  live in the Magic techfile instead. Deck discovery now accepts any
+  antenna-named deck a PDK provides, and the Antenna page gained a Magic
+  `antennacheck` engine, which it selects automatically when no deck exists and
+  explains either way.
+
 - **The official PDK install never ran.** The installer called
   `pip install --user ciel`, which Ubuntu 26.04 refuses outright because its
   system Python is marked externally managed (PEP 668). The manager now gets

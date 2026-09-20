@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -127,6 +128,24 @@ class PythonDiagnosisTests(unittest.TestCase):
         results = [self.system_probe(), self.venv_report(pip="")]
         with patch.object(self.manager, "_run", side_effect=results):
             self.assertEqual(self.manager.diagnose().status, "pip_missing")
+
+    def test_a_usable_running_interpreter_is_reported(self):
+        """A packaged install ships its own environment; the XDG one is optional."""
+        status = self.manager.running_environment()
+
+        self.assertIsNotNone(status)
+        self.assertTrue(status.ready)
+        self.assertIn("PySide6", status.packages)
+
+    def test_the_running_environment_is_ignored_when_it_is_the_managed_one(self):
+        manager = PythonEnvironmentManager(
+            self.root,
+            environ={"XDG_DATA_HOME": str(Path(sys.prefix).parent.parent), "PATH": "/usr/bin"},
+            system_python="/usr/bin/python3",
+        )
+        manager.path = Path(sys.prefix)
+
+        self.assertIsNone(manager.running_environment())
 
     def test_root_repair_is_refused(self):
         with patch("app.core.python_env.os.geteuid", return_value=0):

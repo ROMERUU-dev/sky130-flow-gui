@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import sys
 
+from app.core.antenna_tools import find_klayout_antenna_deck
 from app.core.dependency_manifest import DependencyManifest
 from app.core.env_validator import EnvValidator, REQUIRED_PDK_SUBDIRS
 from app.core.python_env import venv_path
@@ -468,12 +469,12 @@ class SetupManager:
         }
         magic_rc = sky130a / "libs.tech" / "magic" / "sky130A.magicrc"
         netgen_setup = sky130a / "libs.tech" / "netgen" / "sky130A_setup.tcl"
-        antenna_deck = sky130a / "libs.tech" / "klayout" / "drc" / "sky130A_ant.rb"
+        antenna_deck = Path(find_klayout_antenna_deck(sky130a))
         if magic_rc.exists():
             detected["magic_rc"] = str(magic_rc)
         if netgen_setup.exists():
             detected["netgen_setup"] = str(netgen_setup)
-        if antenna_deck.exists():
+        if str(antenna_deck) != "." and antenna_deck.is_file():
             detected["klayout_antenna_deck"] = str(antenna_deck)
         return detected
 

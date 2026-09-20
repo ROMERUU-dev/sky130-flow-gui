@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
+from app.core.antenna_tools import find_klayout_antenna_deck
 from app.core.dependency_manifest import DependencyManifest
 from app.core.i18n import pick
 from app.core.python_env import PythonEnvironmentManager
@@ -229,7 +230,7 @@ class EnvValidator:
         rows.append(
             ValidationRow(
                 key="python:venv",
-                item=pick(lang, "Entorno Python XDG", "XDG Python environment"),
+                item=pick(lang, "Entorno Python", "Python environment"),
                 status=self._python_status_label(diagnosis.python_env, lang),
                 ok=not diagnosis.python_env.problems and diagnosis.python_env.requirements_ok,
                 detail=diagnosis.python_env.message,
@@ -369,12 +370,21 @@ class EnvValidator:
             message=message,
             magic_rc=str(sky130a / "libs.tech" / "magic" / "sky130A.magicrc"),
             netgen_setup=str(sky130a / "libs.tech" / "netgen" / "sky130A_setup.tcl"),
-            klayout_antenna_deck=str(sky130a / "libs.tech" / "klayout" / "drc" / "sky130A_ant.rb"),
+            klayout_antenna_deck=find_klayout_antenna_deck(sky130a),
         )
 
     def _detect_python_environment(self, lang: str) -> PythonEnvDiagnosis:
         app_root = self.repo_root
-        detected = PythonEnvironmentManager(app_root).diagnose()
+        manager = PythonEnvironmentManager(app_root)
+        detected = manager.diagnose()
+        running = None
+        if not detected.ready:
+            # The app is running, so some interpreter already satisfies the
+            # requirements. A packaged install uses the one inside the package
+            # and never needs a user virtualenv.
+            running = manager.running_environment()
+            if running is not None:
+                detected = running
         problems = list(detected.problems)
         legacy_notice = ""
         if detected.legacy_path:
@@ -383,8 +393,17 @@ class EnvValidator:
                 f"A legacy venv was found at {detected.legacy_path} (owner: {detected.legacy_owner}); it is neither used nor copied. Rebuild it at the XDG path.")
         if detected.ready:
             versions = ", ".join(f"{name} {version}" for name, version in detected.packages.items())
-            message = pick(lang, f"Entorno Python listo en {detected.venv_path}: {versions}.",
-                           f"Python environment ready at {detected.venv_path}: {versions}.")
+            if running is not None:
+                message = pick(
+                    lang,
+                    f"Usando el entorno incluido con la app en {detected.venv_path}: {versions}. "
+                    "No hace falta un entorno de usuario aparte.",
+                    f"Using the environment shipped with the app at {detected.venv_path}: {versions}. "
+                    "A separate user environment is not required.",
+                )
+            else:
+                message = pick(lang, f"Entorno Python listo en {detected.venv_path}: {versions}.",
+                               f"Python environment ready at {detected.venv_path}: {versions}.")
             if legacy_notice:
                 message += " " + legacy_notice
         else:

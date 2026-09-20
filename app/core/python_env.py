@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
+import importlib.util
 import json
 import os
 import pwd
@@ -208,6 +209,38 @@ class PythonEnvironmentManager:
         status.packages = dict(report.get("packages", {}))
         status.status = "ready"
         return status
+
+    def running_environment(self) -> PythonEnvironmentStatus | None:
+        """Describe the interpreter running right now, when it is usable.
+
+        A `.deb` install ships its own environment under the application root,
+        so insisting on a user virtualenv reported the machine as broken while
+        the app was visibly running from a perfectly good one.
+        """
+        running = Path(sys.prefix).resolve()
+        if running == self.path.resolve():
+            return None
+        missing = [name for name in REQUIRED_IMPORTS if importlib.util.find_spec(name) is None]
+        if missing:
+            return None
+        packages = {}
+        for name in REQUIRED_IMPORTS:
+            try:
+                packages[name] = importlib.metadata.version(name)
+            except importlib.metadata.PackageNotFoundError:
+                packages[name] = "unknown"
+        return PythonEnvironmentStatus(
+            status="ready",
+            system_python=self.system_python,
+            venv_path=str(running),
+            python_bin=sys.executable,
+            venv_exists=True,
+            venv_owner=self._owner(running),
+            venv_writable=os.access(running, os.W_OK),
+            pip_available=True,
+            requirements_exists=self.requirements.is_file(),
+            packages=packages,
+        )
 
     def check_venv_capability(self) -> CommandResult:
         if not self.system_python:
