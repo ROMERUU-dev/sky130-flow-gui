@@ -2,6 +2,19 @@
 
 ## 0.3.1 — 2026-09-20
 
+### Added
+
+- **Runs are recorded and survive a restart.** What used to be called history
+  was a glob of `*.raw` files: it showed that output existed, but not which
+  netlist produced it, how long it took, or whether it actually succeeded, and
+  nothing at all about extraction, LVS or antenna runs. A JSON log beside the
+  project's outputs now records each run's status, exit code, duration, inputs,
+  command and artifacts. It is written atomically, survives a corrupt file, and
+  is capped at 200 entries.
+- **Each run keeps its own outputs.** Every simulation wrote the same
+  `raw.raw` and `log.txt`, so each run overwrote the last and "load previous"
+  could only ever reopen the newest result. Runs are now addressable by id.
+
 ### Fixed
 
 - **A packaged install reported its own Python environment as broken.** The

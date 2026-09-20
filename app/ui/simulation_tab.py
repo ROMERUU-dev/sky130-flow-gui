@@ -46,6 +46,7 @@ from app.core.i18n import pick
 from app.core.log_parser import LogParser
 from app.core.ngspice_raw_parser import NgspiceRawParser
 from app.core.output_manager import OutputPaths
+from app.core.run_history import KIND_SIMULATION, RunHistory
 from app.core.settings_manager import AppSettings
 from app.core.spice_tools import (
     apply_model_corner,
@@ -291,6 +292,8 @@ class SimulationTab(QWidget):
         self._em_workspace_paths: dict[str, Path] = {}
         self._last_em_metadata_path: Path | None = None
         self._internal_net_candidates: list[dict] = []
+        self._active_run = None
+        self._last_log_path = None
         self._spectrum_base_x_range: tuple[float, float] | None = None
         self._spectrum_base_y_range: tuple[float, float] | None = None
         self._current_spectrum_signal_name = ""
@@ -900,10 +903,19 @@ class SimulationTab(QWidget):
                 self.send_status.emit("EM instrumented netlist generated")
                 return
 
-        cmd, log_path, raw_path, run_cwd = self.builder.run_spec(str(generated_netlist), outputs)
+        self._active_run = RunHistory(outputs.runs).start(
+            KIND_SIMULATION,
+            label=Path(self.netlist_edit.text().strip() or str(generated_netlist)).name,
+            project=str(outputs.base),
+            inputs={"netlist": str(generated_netlist), "source": self.netlist_edit.text().strip()},
+        )
+        cmd, log_path, raw_path, run_cwd = self.builder.run_spec(
+            str(generated_netlist), outputs, run_id=self._active_run.run_id
+        )
         self._append_log(f"Output folder: {outputs.results}\nGenerated netlist: {generated_netlist}\nLog file: {log_path}\n")
         self._last_command = cmd
         self._last_raw_path = Path(raw_path)
+        self._last_log_path = Path(log_path)
         self.wave.set_signals({})
         self._clear_measurements()
         self._clear_spectrum_plot()
@@ -982,12 +994,17 @@ class SimulationTab(QWidget):
         )
         self._append_log(summary)
         full_text = self.log.toPlainText()
-        if LogParser.has_errors(full_text) or code != 0:
+        failed = LogParser.has_errors(full_text) or code != 0
+        if failed:
             self._pending_em_run = None
+            self._record_run_finished(code if code else 1)
             self.send_status.emit(pick(self.lang, "Simulación fallida", "Simulation failed"))
             self._update_run_summary(status=pick(self.lang, "Falló", "Failed"))
         else:
+            # Recorded after the waveforms load, so the summary can state how
+            # many signals the run actually produced.
             self._load_waveforms()
+            self._record_run_finished(0)
             self.refresh_history()
             self.send_status.emit(pick(self.lang, "Simulación completada", "Simulation completed"))
             self._update_run_summary(status=pick(self.lang, "Lista", "Ready"))
@@ -1012,20 +1029,53 @@ class SimulationTab(QWidget):
             self._append_log(f"Failed to load selected history: {exc}\n")
             self.send_status.emit("Failed to load previous simulation")
 
+    def _record_run_finished(self, exit_code: int) -> None:
+        """Close the history entry for the run that just ended."""
+        if self._active_run is None:
+            return
+        outputs = self._last_outputs or self.outputs_getter()
+        artifacts = {
+            "raw": str(self._last_raw_path) if self._last_raw_path else "",
+            "log": str(getattr(self, "_last_log_path", "") or ""),
+        }
+        signal_count = len(self.wave.signal_names())
+        summary = pick(
+            self.lang,
+            f"{signal_count} señales" if signal_count else "",
+            f"{signal_count} signals" if signal_count else "",
+        )
+        try:
+            RunHistory(outputs.runs).finish(self._active_run.run_id, exit_code, artifacts, summary)
+        except OSError as exc:
+            self._append_log(f"No se pudo guardar el historial: {exc}\n")
+        self._active_run = None
+
     def refresh_history(self) -> None:
         outputs = self.outputs_getter()
         active_output_dir = self._last_outputs.results if self._last_outputs else outputs.results
         self.output_dir.setText(str(active_output_dir))
 
         current_path = str(self.history_select.currentData()) if self.history_select.currentData() else None
-        raw_files = sorted(outputs.results.rglob("*.raw"), key=lambda path: path.stat().st_mtime, reverse=True)
 
         self.history_select.blockSignals(True)
         self.history_select.clear()
-        for raw_file in raw_files:
+        seen: set[str] = set()
+
+        # Recorded runs first: they carry status, duration and the netlist used.
+        for record in RunHistory(outputs.runs).records(kind=KIND_SIMULATION, limit=50):
+            raw_path = record.artifacts.get("raw", "")
+            if not raw_path or not Path(raw_path).is_file():
+                continue
+            seen.add(raw_path)
+            self.history_select.addItem(record.describe(), raw_path)
+
+        # Anything on disk that predates the history, so nothing disappears.
+        for raw_file in sorted(outputs.results.rglob("*.raw"),
+                               key=lambda path: path.stat().st_mtime, reverse=True):
+            if str(raw_file) in seen:
+                continue
             rel_path = raw_file.relative_to(outputs.results)
-            label = f"{rel_path}  [{self._format_timestamp(raw_file)}]"
-            self.history_select.addItem(label, str(raw_file))
+            self.history_select.addItem(f"{rel_path}  [{self._format_timestamp(raw_file)}]", str(raw_file))
 
         if current_path:
             index = self.history_select.findData(current_path)
